@@ -1,19 +1,31 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Fund } from "@/hooks/useFinanceData";
-import { Plus, TrendingUp, TrendingDown, DollarSign } from "lucide-react";
+import { Fund, Loan, Collection } from "@/hooks/useFinanceData";
+import { Plus, TrendingUp, TrendingDown, DollarSign, AlertTriangle, PieChart, BarChart3 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface FundTrackerProps {
   funds: Fund[];
+  loans: Loan[];
+  collections: Collection[];
   onAddFund: (fund: Omit<Fund, 'balance'>) => void;
 }
 
-const FundTracker: React.FC<FundTrackerProps> = ({ funds, onAddFund }) => {
+interface TransactionRow {
+  id: string;
+  date: string;
+  description: string;
+  inflow: number;
+  outflow: number;
+  balance: number;
+  type: 'manual' | 'loan' | 'collection' | 'opening';
+}
+
+const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, onAddFund }) => {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [initialBalance, setInitialBalance] = useState('');
@@ -23,6 +35,73 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, onAddFund }) => {
     inflow: '',
     outflow: '',
   });
+
+  // Generate complete transaction history
+  const transactionHistory = useMemo(() => {
+    const transactions: TransactionRow[] = [];
+    
+    // Add manual fund entries
+    funds.forEach(fund => {
+      transactions.push({
+        id: fund.id,
+        date: fund.date,
+        description: fund.description,
+        inflow: fund.inflow,
+        outflow: fund.outflow,
+        balance: 0, // Will be calculated later
+        type: fund.description === 'Initial Balance' ? 'opening' : 'manual'
+      });
+    });
+
+    // Add loan disbursements as outflows
+    loans.forEach(loan => {
+      transactions.push({
+        id: `loan-${loan.id}`,
+        date: loan.date,
+        description: `Loan disbursed to ${loan.customerName} (ID: ${loan.id})`,
+        inflow: 0,
+        outflow: loan.loanAmount,
+        balance: 0, // Will be calculated later
+        type: 'loan'
+      });
+    });
+
+    // Group collections by date and add as inflows
+    const collectionsByDate = collections.reduce((acc, collection) => {
+      if (!acc[collection.date]) {
+        acc[collection.date] = [];
+      }
+      acc[collection.date].push(collection);
+      return acc;
+    }, {} as { [date: string]: Collection[] });
+
+    Object.entries(collectionsByDate).forEach(([date, dayCollections]) => {
+      const totalAmount = dayCollections.reduce((sum, c) => sum + c.amountPaid, 0);
+      const loanIds = [...new Set(dayCollections.map(c => c.loanId))];
+      
+      transactions.push({
+        id: `collection-${date}`,
+        date,
+        description: `Daily collections from ${loanIds.length} loan(s): ${loanIds.join(', ')}`,
+        inflow: totalAmount,
+        outflow: 0,
+        balance: 0, // Will be calculated later
+        type: 'collection'
+      });
+    });
+
+    // Sort by date
+    transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // Calculate running balance
+    let runningBalance = 0;
+    transactions.forEach(transaction => {
+      runningBalance += transaction.inflow - transaction.outflow;
+      transaction.balance = runningBalance;
+    });
+
+    return transactions;
+  }, [funds, loans, collections]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,7 +134,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, onAddFund }) => {
     
     toast({
       title: "Success",
-      description: "Fund transaction recorded successfully",
+      description: "Manual transaction recorded successfully",
     });
   };
 
@@ -90,111 +169,167 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, onAddFund }) => {
     });
   };
 
-  const currentBalance = funds.length > 0 ? funds[funds.length - 1].balance : 0;
-  const totalInflow = funds.reduce((sum, fund) => sum + fund.inflow, 0);
-  const totalOutflow = funds.reduce((sum, fund) => sum + fund.outflow, 0);
+  const currentBalance = transactionHistory.length > 0 ? transactionHistory[transactionHistory.length - 1].balance : 0;
+  const totalInflow = transactionHistory.reduce((sum, t) => sum + t.inflow, 0);
+  const totalOutflow = transactionHistory.reduce((sum, t) => sum + t.outflow, 0);
+  const negativeBalanceDays = transactionHistory.filter(t => t.balance < 0).length;
+
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case 'loan': return '📤';
+      case 'collection': return '💰';
+      case 'opening': return '🏦';
+      default: return '✏️';
+    }
+  };
+
+  const getTypeColor = (type: string) => {
+    switch (type) {
+      case 'loan': return 'text-red-600 bg-red-50';
+      case 'collection': return 'text-emerald-600 bg-emerald-50';
+      case 'opening': return 'text-blue-600 bg-blue-50';
+      default: return 'text-purple-600 bg-purple-50';
+    }
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Fund Tracker</h2>
-          <p className="text-slate-600">Track your financial inflows and outflows</p>
-        </div>
-        <div className="flex gap-2">
-          {funds.length === 0 && (
-            <div className="flex gap-2 items-center">
-              <Input
-                type="number"
-                step="0.01"
-                value={initialBalance}
-                onChange={(e) => setInitialBalance(e.target.value)}
-                placeholder="Initial balance"
-                className="w-40"
-              />
-              <Button onClick={handleInitialBalance} variant="outline">
-                Set Initial Balance
-              </Button>
-            </div>
-          )}
-          <Button 
-            onClick={() => setShowForm(!showForm)}
-            className="bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add Transaction
-          </Button>
+    <div className="space-y-8 p-1">
+      {/* Header Section */}
+      <div className="bg-gradient-to-r from-indigo-900 via-purple-800 to-indigo-900 rounded-2xl p-8 text-white shadow-2xl">
+        <div className="flex justify-between items-center">
+          <div>
+            <h2 className="text-3xl font-bold mb-2">Fund Tracker</h2>
+            <p className="text-indigo-200">Automated cash flow tracking with real-time balance updates</p>
+          </div>
+          <div className="flex gap-3">
+            {transactionHistory.length === 0 && (
+              <div className="flex gap-2 items-center">
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={initialBalance}
+                  onChange={(e) => setInitialBalance(e.target.value)}
+                  placeholder="Initial balance"
+                  className="w-40 bg-white/10 border-white/20 text-white placeholder-white/60"
+                />
+                <Button onClick={handleInitialBalance} variant="outline" className="bg-white/10 border-white/30 text-white hover:bg-white/20">
+                  Set Initial Balance
+                </Button>
+              </div>
+            )}
+            <Button 
+              onClick={() => setShowForm(!showForm)}
+              className="bg-white text-indigo-800 hover:bg-indigo-50 px-6 py-3 rounded-lg shadow-lg transition-all duration-200 hover:shadow-xl font-semibold"
+            >
+              <Plus className="mr-2 h-5 w-5" />
+              Add Manual Entry
+            </Button>
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="bg-white shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-slate-600">Current Balance</CardTitle>
-            <DollarSign className="h-4 w-4 text-blue-600" />
+      {/* Summary Cards */}
+      <div className="grid gap-6 md:grid-cols-4">
+        <Card className="bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-xl overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
+          <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="text-sm font-semibold text-white/90">Current Balance</CardTitle>
+            <div className="p-2 rounded-full bg-white/20 backdrop-blur-sm">
+              <DollarSign className="h-5 w-5 text-white" />
+            </div>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-800">
+          <CardContent className="relative">
+            <div className="text-3xl font-bold mb-1">
               ${currentBalance.toLocaleString()}
             </div>
-            <p className="text-xs text-slate-600 mt-1">Available funds</p>
+            <p className="text-xs text-white/80">Available cash in hand</p>
+            {currentBalance < 0 && (
+              <p className="text-xs text-red-200 flex items-center mt-2">
+                <AlertTriangle className="h-3 w-3 mr-1" />
+                Negative balance
+              </p>
+            )}
           </CardContent>
         </Card>
 
-        <Card className="bg-white shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-slate-600">Total Inflow</CardTitle>
-            <TrendingUp className="h-4 w-4 text-emerald-600" />
+        <Card className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-xl overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
+          <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="text-sm font-semibold text-white/90">Total Inflow</CardTitle>
+            <div className="p-2 rounded-full bg-white/20 backdrop-blur-sm">
+              <TrendingUp className="h-5 w-5 text-white" />
+            </div>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-emerald-600">
+          <CardContent className="relative">
+            <div className="text-3xl font-bold mb-1">
               ${totalInflow.toLocaleString()}
             </div>
-            <p className="text-xs text-slate-600 mt-1">Money received</p>
+            <p className="text-xs text-white/80">Total money received</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-white shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-slate-600">Total Outflow</CardTitle>
-            <TrendingDown className="h-4 w-4 text-red-600" />
+        <Card className="bg-gradient-to-br from-red-600 to-pink-700 text-white shadow-xl overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
+          <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="text-sm font-semibold text-white/90">Total Outflow</CardTitle>
+            <div className="p-2 rounded-full bg-white/20 backdrop-blur-sm">
+              <TrendingDown className="h-5 w-5 text-white" />
+            </div>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">
+          <CardContent className="relative">
+            <div className="text-3xl font-bold mb-1">
               ${totalOutflow.toLocaleString()}
             </div>
-            <p className="text-xs text-slate-600 mt-1">Money spent</p>
+            <p className="text-xs text-white/80">Total money disbursed</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-purple-600 to-indigo-700 text-white shadow-xl overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
+          <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="text-sm font-semibold text-white/90">Risk Days</CardTitle>
+            <div className="p-2 rounded-full bg-white/20 backdrop-blur-sm">
+              <AlertTriangle className="h-5 w-5 text-white" />
+            </div>
+          </CardHeader>
+          <CardContent className="relative">
+            <div className="text-3xl font-bold mb-1">
+              {negativeBalanceDays}
+            </div>
+            <p className="text-xs text-white/80">Days with negative balance</p>
           </CardContent>
         </Card>
       </div>
 
       {showForm && (
-        <Card className="bg-white shadow-lg">
-          <CardHeader>
-            <CardTitle>Add Fund Transaction</CardTitle>
+        <Card className="bg-white shadow-2xl border-0 rounded-2xl overflow-hidden">
+          <CardHeader className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
+            <CardTitle className="text-xl">Add Manual Transaction</CardTitle>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <CardContent className="p-6">
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <Label htmlFor="date">Date</Label>
+                <Label htmlFor="date" className="text-sm font-semibold text-slate-700">Date</Label>
                 <Input
                   id="date"
                   type="date"
                   value={formData.date}
                   onChange={(e) => handleInputChange('date', e.target.value)}
+                  className="mt-1 border-2 border-slate-200 focus:border-purple-500 rounded-lg"
                 />
               </div>
               <div>
-                <Label htmlFor="description">Description *</Label>
+                <Label htmlFor="description" className="text-sm font-semibold text-slate-700">Description *</Label>
                 <Input
                   id="description"
                   value={formData.description}
                   onChange={(e) => handleInputChange('description', e.target.value)}
                   placeholder="Enter transaction description"
+                  className="mt-1 border-2 border-slate-200 focus:border-purple-500 rounded-lg"
                 />
               </div>
               <div>
-                <Label htmlFor="inflow">Inflow (Money In)</Label>
+                <Label htmlFor="inflow" className="text-sm font-semibold text-slate-700">Inflow (Money In)</Label>
                 <Input
                   id="inflow"
                   type="number"
@@ -202,10 +337,11 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, onAddFund }) => {
                   value={formData.inflow}
                   onChange={(e) => handleInputChange('inflow', e.target.value)}
                   placeholder="Enter inflow amount"
+                  className="mt-1 border-2 border-slate-200 focus:border-purple-500 rounded-lg"
                 />
               </div>
               <div>
-                <Label htmlFor="outflow">Outflow (Money Out)</Label>
+                <Label htmlFor="outflow" className="text-sm font-semibold text-slate-700">Outflow (Money Out)</Label>
                 <Input
                   id="outflow"
                   type="number"
@@ -213,16 +349,18 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, onAddFund }) => {
                   value={formData.outflow}
                   onChange={(e) => handleInputChange('outflow', e.target.value)}
                   placeholder="Enter outflow amount"
+                  className="mt-1 border-2 border-slate-200 focus:border-purple-500 rounded-lg"
                 />
               </div>
-              <div className="md:col-span-2 flex gap-2">
-                <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700">
+              <div className="md:col-span-2 flex gap-4 pt-4">
+                <Button type="submit" className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg shadow-lg font-semibold">
                   Add Transaction
                 </Button>
                 <Button 
                   type="button" 
                   variant="outline" 
                   onClick={() => setShowForm(false)}
+                  className="border-2 border-slate-300 hover:bg-slate-50 px-6 py-2 rounded-lg font-semibold"
                 >
                   Cancel
                 </Button>
@@ -232,41 +370,68 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, onAddFund }) => {
         </Card>
       )}
 
-      <Card className="bg-white shadow-lg">
-        <CardHeader>
-          <CardTitle>Transaction History</CardTitle>
+      {/* Transaction History */}
+      <Card className="bg-white shadow-2xl border-0 rounded-2xl overflow-hidden">
+        <CardHeader className="bg-gradient-to-r from-slate-800 to-slate-700 text-white">
+          <CardTitle className="text-xl flex items-center">
+            <BarChart3 className="mr-2 h-6 w-6" />
+            Complete Transaction History
+          </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full table-auto">
-              <thead>
-                <tr className="border-b border-slate-200">
-                  <th className="text-left p-2 font-semibold text-slate-700">Date</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Description</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Inflow</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Outflow</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Balance</th>
+            <table className="w-full">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Date</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Type</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Description</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Inflow</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Outflow</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Balance</th>
                 </tr>
               </thead>
               <tbody>
-                {funds.map((fund) => (
-                  <tr key={fund.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="p-2 text-slate-700">{fund.date}</td>
-                    <td className="p-2 text-slate-800">{fund.description}</td>
-                    <td className="p-2 text-emerald-600 font-medium">
-                      {fund.inflow > 0 ? `$${fund.inflow.toLocaleString()}` : '-'}
+                {transactionHistory.map((transaction, index) => (
+                  <tr key={transaction.id} className={`${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-blue-50 transition-colors`}>
+                    <td className="p-4 text-slate-700 border-b border-slate-100">{transaction.date}</td>
+                    <td className="p-4 border-b border-slate-100">
+                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getTypeColor(transaction.type)}`}>
+                        <span className="mr-1">{getTypeIcon(transaction.type)}</span>
+                        {transaction.type}
+                      </span>
                     </td>
-                    <td className="p-2 text-red-600 font-medium">
-                      {fund.outflow > 0 ? `$${fund.outflow.toLocaleString()}` : '-'}
+                    <td className="p-4 text-slate-800 border-b border-slate-100 max-w-xs truncate" title={transaction.description}>
+                      {transaction.description}
                     </td>
-                    <td className="p-2 text-slate-800 font-medium">${fund.balance.toLocaleString()}</td>
+                    <td className="p-4 border-b border-slate-100">
+                      {transaction.inflow > 0 ? (
+                        <span className="text-emerald-600 font-bold">${transaction.inflow.toLocaleString()}</span>
+                      ) : (
+                        <span className="text-slate-300">-</span>
+                      )}
+                    </td>
+                    <td className="p-4 border-b border-slate-100">
+                      {transaction.outflow > 0 ? (
+                        <span className="text-red-600 font-bold">${transaction.outflow.toLocaleString()}</span>
+                      ) : (
+                        <span className="text-slate-300">-</span>
+                      )}
+                    </td>
+                    <td className="p-4 border-b border-slate-100">
+                      <span className={`font-bold ${transaction.balance < 0 ? 'text-red-600' : 'text-slate-800'}`}>
+                        ${transaction.balance.toLocaleString()}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {funds.length === 0 && (
-              <div className="text-center py-8 text-slate-500">
-                No transactions recorded yet. Set an initial balance or add your first transaction above.
+            {transactionHistory.length === 0 && (
+              <div className="text-center py-12 text-slate-500">
+                <PieChart className="h-16 w-16 mx-auto mb-4 text-slate-300" />
+                <p className="text-lg">No transactions recorded yet</p>
+                <p className="text-sm">Set an initial balance or add your first transaction above to get started</p>
               </div>
             )}
           </div>

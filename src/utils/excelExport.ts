@@ -2,6 +2,70 @@
 import * as XLSX from 'xlsx';
 import { Loan, Collection, Fund } from '@/hooks/useFinanceData';
 
+// Helper function to generate complete fund tracker data
+const generateFundTrackerData = (loans: Loan[], collections: Collection[], funds: Fund[]) => {
+  const transactions: any[] = [];
+  
+  // Add manual fund entries
+  funds.forEach(fund => {
+    transactions.push({
+      Date: fund.date,
+      Description: fund.description,
+      Inflow: fund.inflow,
+      Outflow: fund.outflow,
+      Balance: 0, // Will be calculated later
+      Type: fund.description === 'Initial Balance' ? 'Opening' : 'Manual'
+    });
+  });
+
+  // Add loan disbursements as outflows
+  loans.forEach(loan => {
+    transactions.push({
+      Date: loan.date,
+      Description: `Loan disbursed to ${loan.customerName} (ID: ${loan.id})`,
+      Inflow: 0,
+      Outflow: loan.loanAmount,
+      Balance: 0, // Will be calculated later
+      Type: 'Loan Disbursement'
+    });
+  });
+
+  // Group collections by date and add as inflows
+  const collectionsByDate = collections.reduce((acc, collection) => {
+    if (!acc[collection.date]) {
+      acc[collection.date] = [];
+    }
+    acc[collection.date].push(collection);
+    return acc;
+  }, {} as { [date: string]: Collection[] });
+
+  Object.entries(collectionsByDate).forEach(([date, dayCollections]) => {
+    const totalAmount = dayCollections.reduce((sum, c) => sum + c.amountPaid, 0);
+    const loanIds = [...new Set(dayCollections.map(c => c.loanId))];
+    
+    transactions.push({
+      Date: date,
+      Description: `Daily collections from ${loanIds.length} loan(s): ${loanIds.join(', ')}`,
+      Inflow: totalAmount,
+      Outflow: 0,
+      Balance: 0, // Will be calculated later
+      Type: 'Collection'
+    });
+  });
+
+  // Sort by date
+  transactions.sort((a, b) => new Date(a.Date).getTime() - new Date(b.Date).getTime());
+
+  // Calculate running balance
+  let runningBalance = 0;
+  transactions.forEach(transaction => {
+    runningBalance += transaction.Inflow - transaction.Outflow;
+    transaction.Balance = runningBalance;
+  });
+
+  return transactions;
+};
+
 export const exportToExcel = (loans: Loan[], collections: Collection[], funds: Fund[]) => {
   // Create workbook
   const workbook = XLSX.utils.book_new();
@@ -39,16 +103,9 @@ export const exportToExcel = (loans: Loan[], collections: Collection[], funds: F
   const collectionSheet = XLSX.utils.json_to_sheet(collectionData);
   XLSX.utils.book_append_sheet(workbook, collectionSheet, 'Daily Collections');
 
-  // Fund Tracker Sheet
-  const fundData = funds.map(fund => ({
-    'Date': fund.date,
-    'Description': fund.description,
-    'Inflow': fund.inflow,
-    'Outflow': fund.outflow,
-    'Balance': fund.balance,
-  }));
-
-  const fundSheet = XLSX.utils.json_to_sheet(fundData);
+  // Enhanced Fund Tracker Sheet with automated transactions
+  const fundTrackerData = generateFundTrackerData(loans, collections, funds);
+  const fundSheet = XLSX.utils.json_to_sheet(fundTrackerData);
   XLSX.utils.book_append_sheet(workbook, fundSheet, 'Fund Tracker');
 
   // Generate filename with current date
