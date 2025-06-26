@@ -12,22 +12,35 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
   const calculateMetrics = () => {
-    const totalCapitalInvested = funds.length > 0 ? Math.max(...funds.map(f => f.balance)) : 0;
-    const totalGivenAsLoans = loans.reduce((sum, loan) => sum + loan.loanAmount, 0);
+    // Invested amount = total net given to customers (actual cash out)
+    const totalInvestedAmount = loans.reduce((sum, loan) => sum + loan.netGiven, 0);
+    
+    // Total disbursed = total loan amounts (for tracking)
+    const totalLoanAmountDisbursed = loans.reduce((sum, loan) => sum + loan.loanAmount, 0);
+    
+    // Total received from collections
     const totalReceived = collections.reduce((sum, collection) => sum + collection.amountPaid, 0);
-    const expectedProfit = loans.reduce((sum, loan) => sum + loan.profit, 0);
+    
+    // Expected total profit = sum of all deductions + interest from completed collections
+    const expectedTotalProfit = loans.reduce((sum, loan) => sum + loan.profit, 0);
+    
+    // Cash in hand from fund tracker (latest balance)
     const cashInHand = funds.length > 0 ? funds[funds.length - 1].balance : 0;
+    
+    // Outstanding amount (what customers still owe)
     const outstanding = loans.reduce((sum, loan) => sum + loan.balance, 0);
-    const actualProfitReceived = totalReceived - totalGivenAsLoans;
+    
+    // Actual profit realized = total received - total invested
+    const actualProfitRealized = totalReceived - totalInvestedAmount;
 
     return {
-      totalCapitalInvested,
-      totalGivenAsLoans,
+      totalInvestedAmount,
+      totalLoanAmountDisbursed,
       totalReceived,
-      expectedProfit,
+      expectedTotalProfit,
       cashInHand,
       outstanding,
-      actualProfitReceived,
+      actualProfitRealized,
     };
   };
 
@@ -37,7 +50,6 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
     title, 
     value, 
     icon: Icon, 
-    color, 
     bgGradient,
     isPositive,
     subtitle
@@ -45,28 +57,27 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
     title: string; 
     value: number; 
     icon: any; 
-    color: string; 
     bgGradient: string;
     isPositive?: boolean;
     subtitle?: string;
   }) => (
     <Card className={`relative overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 ${bgGradient}`}>
       <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
-      <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="text-sm font-semibold text-white/90">{title}</CardTitle>
-        <div className={`p-2 rounded-full bg-white/20 backdrop-blur-sm`}>
-          <Icon className={`h-5 w-5 text-white`} />
+      <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+        <CardTitle className="text-xs sm:text-sm font-semibold text-white/90 leading-tight">{title}</CardTitle>
+        <div className="p-1.5 sm:p-2 rounded-full bg-white/20 backdrop-blur-sm flex-shrink-0">
+          <Icon className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
         </div>
       </CardHeader>
-      <CardContent className="relative">
-        <div className="text-3xl font-bold text-white mb-1">
+      <CardContent className="relative px-4 pb-4">
+        <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-white mb-1">
           ${Math.abs(value).toLocaleString()}
         </div>
         {subtitle && (
-          <p className="text-xs text-white/80">{subtitle}</p>
+          <p className="text-xs text-white/80 leading-tight">{subtitle}</p>
         )}
         {isPositive !== undefined && (
-          <p className={`text-xs flex items-center mt-2 ${isPositive ? 'text-emerald-200' : 'text-red-200'}`}>
+          <p className={`text-xs flex items-center mt-1 ${isPositive ? 'text-emerald-200' : 'text-red-200'}`}>
             {isPositive ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
             {isPositive ? 'Positive' : 'Negative'} flow
           </p>
@@ -76,125 +87,114 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
   );
 
   return (
-    <div className="space-y-8 p-1">
+    <div className="space-y-4 sm:space-y-6 lg:space-y-8 p-1">
       {/* Header Section */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-2xl p-8 text-white shadow-2xl">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold mb-2">Financial Overview</h1>
-            <p className="text-slate-300">Real-time insights into your lending business</p>
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl sm:rounded-2xl p-4 sm:p-6 lg:p-8 text-white shadow-2xl">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex-1">
+            <h1 className="text-2xl sm:text-3xl font-bold mb-2">Financial Overview</h1>
+            <p className="text-slate-300 text-sm sm:text-base">Real-time insights into your lending business</p>
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-3 sm:space-x-4">
             <div className="text-right">
-              <p className="text-sm text-slate-300">Current Balance</p>
-              <p className="text-2xl font-bold">${metrics.cashInHand.toLocaleString()}</p>
+              <p className="text-xs sm:text-sm text-slate-300">Current Balance</p>
+              <p className="text-lg sm:text-xl lg:text-2xl font-bold">${metrics.cashInHand.toLocaleString()}</p>
             </div>
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-              <DollarSign className="h-6 w-6 text-white" />
+            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+              <DollarSign className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
             </div>
           </div>
         </div>
       </div>
 
       {/* Primary Metrics */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:gap-4 lg:gap-6 grid-cols-2 lg:grid-cols-4">
         <MetricCard
-          title="Total Capital"
-          value={metrics.totalCapitalInvested}
+          title="Total Invested"
+          value={metrics.totalInvestedAmount}
           icon={Wallet}
-          color="text-blue-600"
           bgGradient="bg-gradient-to-br from-blue-600 to-blue-700"
-          subtitle="Available investment capital"
+          subtitle="Cash given to customers"
         />
         <MetricCard
           title="Loans Disbursed"
-          value={metrics.totalGivenAsLoans}
+          value={metrics.totalLoanAmountDisbursed}
           icon={TrendingDown}
-          color="text-orange-600"
           bgGradient="bg-gradient-to-br from-orange-500 to-red-600"
           isPositive={false}
-          subtitle="Total amount lent out"
+          subtitle="Total loan amounts"
         />
         <MetricCard
-          title="Collections Received"
+          title="Collections"
           value={metrics.totalReceived}
           icon={TrendingUp}
-          color="text-emerald-600"
           bgGradient="bg-gradient-to-br from-emerald-500 to-teal-600"
           isPositive={true}
-          subtitle="Payments collected"
+          subtitle="Payments received"
         />
         <MetricCard
           title="Expected Profit"
-          value={metrics.expectedProfit}
+          value={metrics.expectedTotalProfit}
           icon={Target}
-          color="text-purple-600"
           bgGradient="bg-gradient-to-br from-purple-500 to-indigo-600"
-          subtitle="Total projected profit"
+          subtitle="Projected earnings"
         />
       </div>
 
       {/* Secondary Metrics */}
-      <div className="grid gap-6 md:grid-cols-3">
+      <div className="grid gap-3 sm:gap-4 lg:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         <MetricCard
           title="Cash in Hand"
           value={metrics.cashInHand}
           icon={DollarSign}
-          color="text-emerald-600"
           bgGradient="bg-gradient-to-br from-emerald-600 to-green-700"
           isPositive={metrics.cashInHand > 0}
           subtitle="Available liquidity"
         />
         <MetricCard
-          title="Outstanding Amount"
+          title="Outstanding"
           value={metrics.outstanding}
           icon={AlertCircle}
-          color="text-red-600"
           bgGradient="bg-gradient-to-br from-red-500 to-pink-600"
           isPositive={false}
           subtitle="Pending collections"
         />
         <MetricCard
           title="Actual Profit"
-          value={metrics.actualProfitReceived}
+          value={metrics.actualProfitRealized}
           icon={PieChart}
-          color="text-emerald-600"
           bgGradient="bg-gradient-to-br from-teal-500 to-cyan-600"
-          isPositive={metrics.actualProfitReceived > 0}
+          isPositive={metrics.actualProfitRealized > 0}
           subtitle="Profit realized"
         />
       </div>
 
       {/* Analytics Cards */}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-2">
         <Card className="bg-gradient-to-br from-slate-50 to-white shadow-xl border-0">
           <CardHeader className="bg-gradient-to-r from-slate-800 to-slate-700 text-white rounded-t-lg">
-            <CardTitle className="text-lg font-semibold flex items-center">
-              <BarChart3 className="mr-2 h-5 w-5" />
+            <CardTitle className="text-base sm:text-lg font-semibold flex items-center">
+              <BarChart3 className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
               Portfolio Activity
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-6">
-            <div className="space-y-6">
-              <div className="flex justify-between items-center p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg">
-                <span className="text-sm font-medium text-slate-700">Active Loans</span>
-                <span className="text-2xl font-bold text-emerald-700">
+          <CardContent className="p-4 sm:p-6">
+            <div className="space-y-4 sm:space-y-6">
+              <div className="flex justify-between items-center p-3 sm:p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg">
+                <span className="text-xs sm:text-sm font-medium text-slate-700">Active Loans</span>
+                <span className="text-xl sm:text-2xl font-bold text-emerald-700">
                   {loans.filter(loan => loan.status === 'Ongoing').length}
                 </span>
               </div>
-              <div className="flex justify-between items-center p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg">
-                <span className="text-sm font-medium text-slate-700">Completed Loans</span>
-                <span className="text-2xl font-bold text-blue-700">
+              <div className="flex justify-between items-center p-3 sm:p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg">
+                <span className="text-xs sm:text-sm font-medium text-slate-700">Completed Loans</span>
+                <span className="text-xl sm:text-2xl font-bold text-blue-700">
                   {loans.filter(loan => loan.status === 'Completed').length}
                 </span>
               </div>
-              <div className="flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg">
-                <span className="text-sm font-medium text-slate-700">Total Collections</span>
-                <span className="text-2xl font-bold text-purple-700">{collections.length}</span>
-              </div>
-              <div className="flex justify-between items-center p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg">
-                <span className="text-sm font-medium text-slate-700">Fund Transactions</span>
-                <span className="text-2xl font-bold text-amber-700">{funds.length}</span>
+              <div className="flex justify-between items-center p-3 sm:p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg">
+                <span className="text-xs sm:text-sm font-medium text-slate-700">Total Collections</span>
+                <span className="text-xl sm:text-2xl font-bold text-purple-700">{collections.length}</span>
               </div>
             </div>
           </CardContent>
@@ -202,19 +202,19 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
 
         <Card className="bg-gradient-to-br from-slate-50 to-white shadow-xl border-0">
           <CardHeader className="bg-gradient-to-r from-indigo-800 to-purple-700 text-white rounded-t-lg">
-            <CardTitle className="text-lg font-semibold flex items-center">
-              <Target className="mr-2 h-5 w-5" />
+            <CardTitle className="text-base sm:text-lg font-semibold flex items-center">
+              <Target className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
               Performance Metrics
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-6">
-            <div className="space-y-6">
-              <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg">
+          <CardContent className="p-4 sm:p-6">
+            <div className="space-y-4 sm:space-y-6">
+              <div className="p-3 sm:p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-slate-700">Recovery Rate</span>
-                  <span className="text-xl font-bold text-emerald-700">
-                    {metrics.totalGivenAsLoans > 0 
-                      ? `${((metrics.totalReceived / metrics.totalGivenAsLoans) * 100).toFixed(1)}%`
+                  <span className="text-xs sm:text-sm font-medium text-slate-700">Recovery Rate</span>
+                  <span className="text-lg sm:text-xl font-bold text-emerald-700">
+                    {metrics.totalInvestedAmount > 0 
+                      ? `${((metrics.totalReceived / metrics.totalInvestedAmount) * 100).toFixed(1)}%`
                       : '0%'
                     }
                   </span>
@@ -222,17 +222,17 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
                 <div className="w-full bg-emerald-200 rounded-full h-2">
                   <div 
                     className="bg-emerald-600 h-2 rounded-full transition-all duration-500" 
-                    style={{ width: `${Math.min(100, (metrics.totalReceived / metrics.totalGivenAsLoans) * 100)}%` }}
+                    style={{ width: `${Math.min(100, (metrics.totalReceived / metrics.totalInvestedAmount) * 100)}%` }}
                   ></div>
                 </div>
               </div>
               
-              <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
+              <div className="p-3 sm:p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-slate-700">Profit Margin</span>
-                  <span className="text-xl font-bold text-purple-700">
-                    {metrics.totalGivenAsLoans > 0 
-                      ? `${((metrics.expectedProfit / metrics.totalGivenAsLoans) * 100).toFixed(1)}%`
+                  <span className="text-xs sm:text-sm font-medium text-slate-700">Profit Margin</span>
+                  <span className="text-lg sm:text-xl font-bold text-purple-700">
+                    {metrics.totalInvestedAmount > 0 
+                      ? `${((metrics.expectedTotalProfit / metrics.totalInvestedAmount) * 100).toFixed(1)}%`
                       : '0%'
                     }
                   </span>
@@ -240,25 +240,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
                 <div className="w-full bg-purple-200 rounded-full h-2">
                   <div 
                     className="bg-purple-600 h-2 rounded-full transition-all duration-500" 
-                    style={{ width: `${Math.min(100, (metrics.expectedProfit / metrics.totalGivenAsLoans) * 100)}%` }}
-                  ></div>
-                </div>
-              </div>
-              
-              <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-slate-700">Collection Efficiency</span>
-                  <span className="text-xl font-bold text-blue-700">
-                    {loans.reduce((sum, loan) => sum + loan.totalToReceive, 0) > 0
-                      ? `${((metrics.totalReceived / loans.reduce((sum, loan) => sum + loan.totalToReceive, 0)) * 100).toFixed(1)}%`
-                      : '0%'
-                    }
-                  </span>
-                </div>
-                <div className="w-full bg-blue-200 rounded-full h-2">
-                  <div 
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-500" 
-                    style={{ width: `${Math.min(100, (metrics.totalReceived / loans.reduce((sum, loan) => sum + loan.totalToReceive, 0)) * 100)}%` }}
+                    style={{ width: `${Math.min(100, (metrics.expectedTotalProfit / metrics.totalInvestedAmount) * 100)}%` }}
                   ></div>
                 </div>
               </div>

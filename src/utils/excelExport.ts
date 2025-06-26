@@ -18,13 +18,13 @@ const generateFundTrackerData = (loans: Loan[], collections: Collection[], funds
     });
   });
 
-  // Add loan disbursements as outflows
+  // Add loan disbursements as outflows (using netGiven - actual cash out)
   loans.forEach(loan => {
     transactions.push({
       Date: loan.date,
       Description: `Loan disbursed to ${loan.customerName} (ID: ${loan.id})`,
       Inflow: 0,
-      Outflow: loan.loanAmount,
+      Outflow: loan.netGiven, // Use netGiven instead of loanAmount
       Balance: 0, // Will be calculated later
       Type: 'Loan Disbursement'
     });
@@ -70,7 +70,7 @@ export const exportToExcel = (loans: Loan[], collections: Collection[], funds: F
   // Create workbook
   const workbook = XLSX.utils.book_new();
 
-  // Loan Summary Sheet
+  // Loan Summary Sheet with corrected calculations
   const loanData = loans.map(loan => ({
     'Loan ID': loan.id,
     'Customer Name': loan.customerName,
@@ -85,6 +85,7 @@ export const exportToExcel = (loans: Loan[], collections: Collection[], funds: F
     'Balance': loan.balance,
     'Status': loan.status,
     'Profit': loan.profit,
+    'Notes': 'Invested Amount = Net Given, Profit = Deduction + Collection Interest'
   }));
 
   const loanSheet = XLSX.utils.json_to_sheet(loanData);
@@ -103,7 +104,7 @@ export const exportToExcel = (loans: Loan[], collections: Collection[], funds: F
   const collectionSheet = XLSX.utils.json_to_sheet(collectionData);
   XLSX.utils.book_append_sheet(workbook, collectionSheet, 'Daily Collections');
 
-  // Enhanced Fund Tracker Sheet with automated transactions
+  // Enhanced Fund Tracker Sheet with corrected cash flow tracking
   const fundTrackerData = generateFundTrackerData(loans, collections, funds);
   const fundSheet = XLSX.utils.json_to_sheet(fundTrackerData);
   XLSX.utils.book_append_sheet(workbook, fundSheet, 'Fund Tracker');

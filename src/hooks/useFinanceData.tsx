@@ -72,13 +72,23 @@ export const useFinanceData = () => {
   }, [funds]);
 
   const calculateLoanMetrics = (loan: Omit<Loan, 'totalToReceive' | 'collected' | 'balance' | 'status' | 'profit'>) => {
-    const totalToReceive = loan.dailyPay * loan.days;
+    // Total to receive is the full loan amount (what customer needs to pay back)
+    const totalToReceive = loan.loanAmount;
+    
+    // Calculate collected amount from collections
     const collected = collections
       .filter(c => c.loanId === loan.id)
       .reduce((sum, c) => sum + c.amountPaid, 0);
+    
+    // Balance is what's still owed
     const balance = totalToReceive - collected;
-    const status = balance === 0 ? 'Completed' as const : 'Ongoing' as const;
-    const profit = totalToReceive - loan.loanAmount;
+    
+    // Status based on balance
+    const status = balance <= 0 ? 'Completed' as const : 'Ongoing' as const;
+    
+    // Profit = deduction (upfront) + (collected - netGiven) for ongoing collections
+    // For completed loans, profit = loanAmount - netGiven
+    const profit = loan.deduction + (collected > loan.netGiven ? collected - loan.netGiven : 0);
     
     return {
       ...loan,
@@ -118,15 +128,16 @@ export const useFinanceData = () => {
   };
 
   const addFund = (fundData: Omit<Fund, 'balance'>) => {
-    const lastBalance = funds.length > 0 ? funds[funds.length - 1].balance : 0;
-    const newBalance = lastBalance + fundData.inflow - fundData.outflow;
+    // Get all transactions to calculate proper running balance
+    const allTransactions = [...funds, fundData].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
-    const newFund: Fund = {
-      ...fundData,
-      balance: newBalance,
-    };
+    let runningBalance = 0;
+    const updatedFunds = allTransactions.map(fund => {
+      runningBalance += fund.inflow - fund.outflow;
+      return { ...fund, balance: runningBalance };
+    });
     
-    setFunds(prev => [...prev, newFund]);
+    setFunds(updatedFunds);
   };
 
   return {
