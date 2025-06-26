@@ -13,8 +13,9 @@ export interface Loan {
   totalToReceive: number;
   collected: number;
   balance: number;
-  status: 'Ongoing' | 'Completed';
+  status: 'Ongoing' | 'Completed' | 'Disabled';
   profit: number;
+  isDisabled?: boolean;
 }
 
 export interface Collection {
@@ -83,8 +84,13 @@ export const useFinanceData = () => {
     // Balance is what's still owed
     const balance = totalToReceive - collected;
     
-    // Status based on balance
-    const status = balance <= 0 ? 'Completed' as const : 'Ongoing' as const;
+    // Status based on balance and disabled state
+    let status: 'Ongoing' | 'Completed' | 'Disabled';
+    if (loan.isDisabled) {
+      status = 'Disabled';
+    } else {
+      status = balance <= 0 ? 'Completed' : 'Ongoing';
+    }
     
     // Profit = deduction (upfront) + (collected - netGiven) for ongoing collections
     // For completed loans, profit = loanAmount - netGiven
@@ -109,6 +115,22 @@ export const useFinanceData = () => {
     setLoans(prev => prev.map(loan => {
       if (loan.id === loanId) {
         const updated = { ...loan, ...updates };
+        return calculateLoanMetrics(updated);
+      }
+      return loan;
+    }));
+  };
+
+  const deleteLoan = (loanId: string) => {
+    setLoans(prev => prev.filter(loan => loan.id !== loanId));
+    // Also remove related collections
+    setCollections(prev => prev.filter(collection => collection.loanId !== loanId));
+  };
+
+  const toggleLoanStatus = (loanId: string) => {
+    setLoans(prev => prev.map(loan => {
+      if (loan.id === loanId) {
+        const updated = { ...loan, isDisabled: !loan.isDisabled };
         return calculateLoanMetrics(updated);
       }
       return loan;
@@ -140,6 +162,22 @@ export const useFinanceData = () => {
     setFunds(updatedFunds);
   };
 
+  const getLoanCashFlow = (loanId: string) => {
+    const loan = loans.find(l => l.id === loanId);
+    if (!loan) return null;
+
+    const loanCollections = collections.filter(c => c.loanId === loanId);
+    
+    return {
+      loan,
+      collections: loanCollections,
+      totalInflow: loanCollections.reduce((sum, c) => sum + c.amountPaid, 0),
+      totalOutflow: loan.netGiven,
+      netFlow: loanCollections.reduce((sum, c) => sum + c.amountPaid, 0) - loan.netGiven,
+      profit: loan.profit
+    };
+  };
+
   return {
     loans,
     collections,
@@ -148,5 +186,8 @@ export const useFinanceData = () => {
     addCollection,
     addFund,
     updateLoan,
+    deleteLoan,
+    toggleLoanStatus,
+    getLoanCashFlow,
   };
 };

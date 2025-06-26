@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,19 +5,33 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Loan, Collection } from "@/hooks/useFinanceData";
-import { Plus } from "lucide-react";
+import { Plus, Trash2, Power, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import LoanCashFlowModal from "./LoanCashFlowModal";
 
 interface LoanSummaryProps {
   loans: Loan[];
   collections: Collection[];
   onAddLoan: (loan: Omit<Loan, 'totalToReceive' | 'collected' | 'balance' | 'status' | 'profit'>) => void;
   onUpdateLoan: (loanId: string, updates: Partial<Loan>) => void;
+  deleteLoan: (loanId: string) => void;
+  toggleLoanStatus: (loanId: string) => void;
+  getLoanCashFlow: (loanId: string) => any;
 }
 
-const LoanSummary: React.FC<LoanSummaryProps> = ({ loans, collections, onAddLoan, onUpdateLoan }) => {
+const LoanSummary: React.FC<LoanSummaryProps> = ({ 
+  loans, 
+  collections, 
+  onAddLoan, 
+  onUpdateLoan, 
+  deleteLoan, 
+  toggleLoanStatus, 
+  getLoanCashFlow 
+}) => {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
+  const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
+  const [showCashFlow, setShowCashFlow] = useState(false);
   const [formData, setFormData] = useState({
     id: '',
     customerName: '',
@@ -76,6 +89,29 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({ loans, collections, onAddLoan
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleDelete = (loanId: string, customerName: string) => {
+    if (window.confirm(`Are you sure you want to delete the loan for ${customerName}? This action cannot be undone.`)) {
+      deleteLoan(loanId);
+      toast({
+        title: "Success",
+        description: "Loan deleted successfully",
+      });
+    }
+  };
+
+  const handleToggleStatus = (loanId: string, currentStatus: string) => {
+    toggleLoanStatus(loanId);
+    toast({
+      title: "Success",
+      description: `Loan ${currentStatus === 'Disabled' ? 'enabled' : 'disabled'} successfully`,
+    });
+  };
+
+  const handleViewCashFlow = (loanId: string) => {
+    setSelectedLoanId(loanId);
+    setShowCashFlow(true);
   };
 
   return (
@@ -194,9 +230,10 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({ loans, collections, onAddLoan
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
-            <table className="w-full table-auto">
+            <table className="w-full table-auto min-w-[1200px]">
               <thead>
                 <tr className="border-b border-slate-200">
+                  <th className="text-left p-2 font-semibold text-slate-700">Actions</th>
                   <th className="text-left p-2 font-semibold text-slate-700">Loan ID</th>
                   <th className="text-left p-2 font-semibold text-slate-700">Customer</th>
                   <th className="text-left p-2 font-semibold text-slate-700">Date</th>
@@ -213,7 +250,38 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({ loans, collections, onAddLoan
               </thead>
               <tbody>
                 {loans.map((loan) => (
-                  <tr key={loan.id} className="border-b border-slate-100 hover:bg-slate-50">
+                  <tr key={loan.id} className={`border-b border-slate-100 hover:bg-slate-50 ${loan.isDisabled ? 'opacity-60' : ''}`}>
+                    <td className="p-2">
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleViewCashFlow(loan.id)}
+                          className="h-8 w-8 p-0"
+                          title="View Cash Flow"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleToggleStatus(loan.id, loan.status)}
+                          className={`h-8 w-8 p-0 ${loan.isDisabled ? 'text-green-600 hover:text-green-700' : 'text-orange-600 hover:text-orange-700'}`}
+                          title={loan.isDisabled ? 'Enable Loan' : 'Disable Loan'}
+                        >
+                          <Power className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDelete(loan.id, loan.customerName)}
+                          className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+                          title="Delete Loan"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
                     <td className="p-2 font-medium text-slate-800">{loan.id}</td>
                     <td className="p-2 text-slate-700">{loan.customerName}</td>
                     <td className="p-2 text-slate-600">{loan.date}</td>
@@ -225,7 +293,11 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({ loans, collections, onAddLoan
                     <td className="p-2 text-emerald-600 font-medium">${loan.collected.toLocaleString()}</td>
                     <td className="p-2 text-red-600 font-medium">${loan.balance.toLocaleString()}</td>
                     <td className="p-2">
-                      <Badge variant={loan.status === 'Completed' ? 'default' : 'secondary'}>
+                      <Badge variant={
+                        loan.status === 'Completed' ? 'default' : 
+                        loan.status === 'Disabled' ? 'destructive' : 
+                        'secondary'
+                      }>
                         {loan.status}
                       </Badge>
                     </td>
@@ -242,6 +314,13 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({ loans, collections, onAddLoan
           </div>
         </CardContent>
       </Card>
+
+      <LoanCashFlowModal 
+        isOpen={showCashFlow}
+        onClose={() => setShowCashFlow(false)}
+        loanId={selectedLoanId}
+        getLoanCashFlow={getLoanCashFlow}
+      />
     </div>
   );
 };

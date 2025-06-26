@@ -12,7 +12,18 @@ import { exportToExcel } from "@/utils/excelExport";
 import { useFinanceData } from "@/hooks/useFinanceData";
 
 const Index = () => {
-  const { loans, collections, funds, addLoan, addCollection, addFund, updateLoan } = useFinanceData();
+  const { 
+    loans, 
+    collections, 
+    funds, 
+    addLoan, 
+    addCollection, 
+    addFund, 
+    updateLoan,
+    deleteLoan,
+    toggleLoanStatus,
+    getLoanCashFlow
+  } = useFinanceData();
 
   const handleExportAll = () => {
     exportToExcel(loans, collections, funds);
@@ -94,6 +105,9 @@ const Index = () => {
               collections={collections} 
               onAddLoan={addLoan}
               onUpdateLoan={updateLoan}
+              deleteLoan={deleteLoan}
+              toggleLoanStatus={toggleLoanStatus}
+              getLoanCashFlow={getLoanCashFlow}
             />
           </TabsContent>
 

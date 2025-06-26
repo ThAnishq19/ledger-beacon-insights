@@ -1,10 +1,11 @@
+
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Fund, Loan, Collection } from "@/hooks/useFinanceData";
-import { Plus, TrendingUp, TrendingDown, DollarSign, AlertTriangle, PieChart, BarChart3 } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, DollarSign, AlertTriangle, PieChart, BarChart3, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface FundTrackerProps {
@@ -28,6 +29,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [initialBalance, setInitialBalance] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     date: '',
     description: '',
@@ -35,121 +37,140 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
     outflow: '',
   });
 
-  // Generate complete transaction history with proper balance calculation
+  // Optimized transaction history calculation
   const transactionHistory = useMemo(() => {
+    console.log('Calculating transaction history...');
     const transactions: TransactionRow[] = [];
     
-    // Add manual fund entries
-    funds.forEach(fund => {
-      transactions.push({
-        id: fund.id,
-        date: fund.date,
-        description: fund.description,
-        inflow: fund.inflow,
-        outflow: fund.outflow,
-        balance: 0, // Will be calculated later
-        type: fund.description === 'Initial Balance' ? 'opening' : 'manual'
+    try {
+      // Add manual fund entries
+      funds.forEach(fund => {
+        transactions.push({
+          id: fund.id,
+          date: fund.date,
+          description: fund.description,
+          inflow: fund.inflow,
+          outflow: fund.outflow,
+          balance: 0,
+          type: fund.description === 'Initial Balance' ? 'opening' : 'manual'
+        });
       });
-    });
 
-    // Add loan disbursements as outflows (using netGiven - actual cash out)
-    loans.forEach(loan => {
-      transactions.push({
-        id: `loan-${loan.id}`,
-        date: loan.date,
-        description: `Loan disbursed to ${loan.customerName} (ID: ${loan.id})`,
-        inflow: 0,
-        outflow: loan.netGiven, // Use netGiven (actual cash given)
-        balance: 0,
-        type: 'loan'
+      // Add loan disbursements (only enabled loans)
+      loans
+        .filter(loan => !loan.isDisabled)
+        .forEach(loan => {
+          transactions.push({
+            id: `loan-${loan.id}`,
+            date: loan.date,
+            description: `Loan disbursed to ${loan.customerName} (ID: ${loan.id})`,
+            inflow: 0,
+            outflow: loan.netGiven,
+            balance: 0,
+            type: 'loan'
+          });
+        });
+
+      // Group collections by date efficiently
+      const collectionsByDate = new Map<string, Collection[]>();
+      collections.forEach(collection => {
+        const existing = collectionsByDate.get(collection.date) || [];
+        existing.push(collection);
+        collectionsByDate.set(collection.date, existing);
       });
-    });
 
-    // Group collections by date and add as inflows
-    const collectionsByDate = collections.reduce((acc, collection) => {
-      if (!acc[collection.date]) {
-        acc[collection.date] = [];
-      }
-      acc[collection.date].push(collection);
-      return acc;
-    }, {} as { [date: string]: Collection[] });
-
-    Object.entries(collectionsByDate).forEach(([date, dayCollections]) => {
-      const totalAmount = dayCollections.reduce((sum, c) => sum + c.amountPaid, 0);
-      const loanIds = [...new Set(dayCollections.map(c => c.loanId))];
-      
-      transactions.push({
-        id: `collection-${date}`,
-        date,
-        description: `Daily collections from ${loanIds.length} loan(s): ${loanIds.join(', ')}`,
-        inflow: totalAmount,
-        outflow: 0,
-        balance: 0,
-        type: 'collection'
+      // Add collection entries
+      collectionsByDate.forEach((dayCollections, date) => {
+        const totalAmount = dayCollections.reduce((sum, c) => sum + c.amountPaid, 0);
+        const loanIds = [...new Set(dayCollections.map(c => c.loanId))];
+        
+        transactions.push({
+          id: `collection-${date}`,
+          date,
+          description: `Daily collections from ${loanIds.length} loan(s): ${loanIds.join(', ')}`,
+          inflow: totalAmount,
+          outflow: 0,
+          balance: 0,
+          type: 'collection'
+        });
       });
-    });
 
-    // Sort by date and time (if available)
-    transactions.sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      if (dateA !== dateB) return dateA - dateB;
-      
-      // If same date, prioritize order: opening -> manual -> loan -> collection
-      const typeOrder = { opening: 0, manual: 1, loan: 2, collection: 3 };
-      return typeOrder[a.type] - typeOrder[b.type];
-    });
+      // Sort transactions
+      transactions.sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+        
+        const typeOrder = { opening: 0, manual: 1, loan: 2, collection: 3 };
+        return typeOrder[a.type] - typeOrder[b.type];
+      });
 
-    // Calculate running balance
-    let runningBalance = 0;
-    transactions.forEach(transaction => {
-      runningBalance += transaction.inflow - transaction.outflow;
-      transaction.balance = runningBalance;
-    });
+      // Calculate running balance
+      let runningBalance = 0;
+      transactions.forEach(transaction => {
+        runningBalance += transaction.inflow - transaction.outflow;
+        transaction.balance = runningBalance;
+      });
 
-    return transactions;
+      console.log('Transaction history calculated successfully');
+      return transactions;
+    } catch (error) {
+      console.error('Error calculating transaction history:', error);
+      return [];
+    }
   }, [funds, loans, collections]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsLoading(true);
     
-    if (!formData.description || (!formData.inflow && !formData.outflow)) {
+    try {
+      if (!formData.description || (!formData.inflow && !formData.outflow)) {
+        toast({
+          title: "Validation Error",
+          description: "Please fill in description and at least one amount field",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const newFund = {
+        id: Date.now().toString(),
+        date: formData.date || new Date().toISOString().split('T')[0],
+        description: formData.description,
+        inflow: parseFloat(formData.inflow) || 0,
+        outflow: parseFloat(formData.outflow) || 0,
+      };
+
+      onAddFund(newFund);
+      setFormData({
+        date: '',
+        description: '',
+        inflow: '',
+        outflow: '',
+      });
+      setShowForm(false);
+      
       toast({
-        title: "Validation Error",
-        description: "Please fill in description and at least one amount field",
+        title: "Success",
+        description: "Manual transaction recorded successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add transaction",
         variant: "destructive",
       });
-      return;
+    } finally {
+      setIsLoading(false);
     }
-
-    const newFund = {
-      id: Date.now().toString(),
-      date: formData.date || new Date().toISOString().split('T')[0],
-      description: formData.description,
-      inflow: parseFloat(formData.inflow) || 0,
-      outflow: parseFloat(formData.outflow) || 0,
-    };
-
-    onAddFund(newFund);
-    setFormData({
-      date: '',
-      description: '',
-      inflow: '',
-      outflow: '',
-    });
-    setShowForm(false);
-    
-    toast({
-      title: "Success",
-      description: "Manual transaction recorded successfully",
-    });
   };
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleInitialBalance = () => {
+  const handleInitialBalance = async () => {
     if (!initialBalance) {
       toast({
         title: "Validation Error",
@@ -159,23 +180,35 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
       return;
     }
 
-    const newFund = {
-      id: `initial-${Date.now()}`,
-      date: new Date().toISOString().split('T')[0],
-      description: 'Initial Balance',
-      inflow: parseFloat(initialBalance),
-      outflow: 0,
-    };
+    setIsLoading(true);
+    try {
+      const newFund = {
+        id: `initial-${Date.now()}`,
+        date: new Date().toISOString().split('T')[0],
+        description: 'Initial Balance',
+        inflow: parseFloat(initialBalance),
+        outflow: 0,
+      };
 
-    onAddFund(newFund);
-    setInitialBalance('');
-    
-    toast({
-      title: "Success",
-      description: "Initial balance set successfully",
-    });
+      onAddFund(newFund);
+      setInitialBalance('');
+      
+      toast({
+        title: "Success",
+        description: "Initial balance set successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to set initial balance",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
+  // Calculate summary metrics
   const currentBalance = transactionHistory.length > 0 ? transactionHistory[transactionHistory.length - 1].balance : 0;
   const totalInflow = transactionHistory.reduce((sum, t) => sum + t.inflow, 0);
   const totalOutflow = transactionHistory.reduce((sum, t) => sum + t.outflow, 0);
@@ -199,6 +232,14 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8 p-1">
       {/* Header Section */}
@@ -209,7 +250,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
             <p className="text-indigo-200 text-sm sm:text-base">Automated cash flow tracking with real-time balance updates</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
-            {transactionHistory.length === 0 && (
+            {transactionHistory.length === 0 && !isLoading && (
               <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
                 <Input
                   type="number"
@@ -219,7 +260,12 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
                   placeholder="Initial balance"
                   className="w-full sm:w-40 bg-white/10 border-white/20 text-white placeholder-white/60"
                 />
-                <Button onClick={handleInitialBalance} variant="outline" className="bg-white/10 border-white/30 text-white hover:bg-white/20 whitespace-nowrap">
+                <Button 
+                  onClick={handleInitialBalance} 
+                  variant="outline" 
+                  className="bg-white/10 border-white/30 text-white hover:bg-white/20 whitespace-nowrap"
+                  disabled={isLoading}
+                >
                   Set Initial Balance
                 </Button>
               </div>
@@ -227,6 +273,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
             <Button 
               onClick={() => setShowForm(!showForm)}
               className="bg-white text-indigo-800 hover:bg-indigo-50 px-4 sm:px-6 py-2 sm:py-3 rounded-lg shadow-lg transition-all duration-200 hover:shadow-xl font-semibold whitespace-nowrap"
+              disabled={isLoading}
             >
               <Plus className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
               Add Manual Entry
@@ -308,6 +355,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
         </Card>
       </div>
 
+      {/* Manual Transaction Form */}
       {showForm && (
         <Card className="bg-white shadow-2xl border-0 rounded-xl sm:rounded-2xl overflow-hidden">
           <CardHeader className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
@@ -360,8 +408,12 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
                 />
               </div>
               <div className="sm:col-span-2 flex flex-col sm:flex-row gap-4 pt-4">
-                <Button type="submit" className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg shadow-lg font-semibold">
-                  Add Transaction
+                <Button 
+                  type="submit" 
+                  className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg shadow-lg font-semibold"
+                  disabled={isLoading}
+                >
+                  {isLoading ? 'Adding...' : 'Add Transaction'}
                 </Button>
                 <Button 
                   type="button" 
