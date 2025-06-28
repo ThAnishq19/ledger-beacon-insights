@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ interface TransactionRow {
 const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, onAddFund }) => {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
+  const [showInitialBalance, setShowInitialBalance] = useState(funds.length === 0);
   const [initialBalance, setInitialBalance] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -261,6 +263,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
       console.log('Setting initial balance:', newFund);
       await onAddFund(newFund);
       setInitialBalance('');
+      setShowInitialBalance(false);
       
       toast({
         title: "Success",
@@ -306,89 +309,111 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
   };
 
   return (
-    <div className="space-y-6 p-4">
+    <div className="space-y-4 sm:space-y-6 p-2 sm:p-4">
       {/* Header Section - Light Theme */}
-      <div className="bg-gradient-to-r from-indigo-100 via-purple-100 to-indigo-100 border border-indigo-200 rounded-2xl p-6 shadow-lg">
+      <div className="bg-gradient-to-r from-indigo-100 via-purple-100 to-indigo-100 border border-indigo-200 rounded-xl sm:rounded-2xl p-4 sm:p-6 lg:p-8 shadow-lg">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
           <div className="flex-1">
-            <h2 className="text-3xl font-bold mb-2 text-slate-800">Fund Tracker</h2>
-            <p className="text-slate-600">Monitor cash flow and track all financial transactions</p>
+            <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold mb-2 text-slate-800">Fund Tracker</h2>
+            <p className="text-slate-600 text-sm sm:text-base">Monitor cash flow and track all financial transactions</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
-            {funds.length === 0 && (
-              <div className="flex gap-2 items-center">
+            {(funds.length === 0 || showInitialBalance) && (
+              <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
                 <Input
                   type="number"
                   step="0.01"
                   value={initialBalance}
                   onChange={(e) => setInitialBalance(e.target.value)}
                   placeholder="Enter initial balance"
-                  className="w-48 bg-white border-slate-300"
+                  className="w-full sm:w-48 bg-white border-slate-300"
                 />
-                <Button 
-                  onClick={handleInitialBalance} 
-                  variant="outline" 
-                  className="bg-white border-slate-300 text-slate-700 hover:bg-slate-50"
-                  disabled={isLoading}
-                >
-                  Set Balance
-                </Button>
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <Button 
+                    onClick={handleInitialBalance} 
+                    variant="outline" 
+                    className="bg-white border-slate-300 text-slate-700 hover:bg-slate-50 flex-1 sm:flex-none"
+                    disabled={isLoading}
+                  >
+                    Set Balance
+                  </Button>
+                  {funds.length > 0 && (
+                    <Button 
+                      onClick={() => setShowInitialBalance(false)} 
+                      variant="outline" 
+                      className="bg-white border-slate-300 text-slate-700 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
-            <Button 
-              onClick={() => setShowForm(!showForm)}
-              className="bg-indigo-600 text-white hover:bg-indigo-700 px-6 py-3 rounded-lg shadow-lg font-semibold"
-              disabled={isLoading}
-            >
-              <Plus className="mr-2 h-5 w-5" />
-              Add Transaction
-            </Button>
+            <div className="flex gap-2 w-full sm:w-auto">
+              {funds.length > 0 && !showInitialBalance && (
+                <Button 
+                  onClick={() => setShowInitialBalance(true)}
+                  variant="outline" 
+                  className="bg-white border-slate-300 text-slate-700 hover:bg-slate-50 flex-1 sm:flex-none"
+                >
+                  Add Balance
+                </Button>
+              )}
+              <Button 
+                onClick={() => setShowForm(!showForm)}
+                className="bg-indigo-600 text-white hover:bg-indigo-700 px-4 sm:px-6 py-2 sm:py-3 rounded-lg shadow-lg font-semibold flex-1 sm:flex-none"
+                disabled={isLoading}
+              >
+                <Plus className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
+                Add Transaction
+              </Button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Summary Cards - Light Colors */}
-      <div className="grid gap-6 grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:gap-4 lg:gap-6 grid-cols-2 lg:grid-cols-4">
         <Card className="bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold">Current Balance</CardTitle>
-            <DollarSign className="h-5 w-5" />
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 sm:p-4">
+            <CardTitle className="text-xs sm:text-sm font-semibold">Current Balance</CardTitle>
+            <DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold mb-1">{formatCurrency(currentBalance)}</div>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold mb-1">{formatCurrency(currentBalance)}</div>
             <p className="text-xs text-white/90">Available cash</p>
           </CardContent>
         </Card>
 
         <Card className="bg-gradient-to-br from-blue-400 to-indigo-500 text-white shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold">Total Inflow</CardTitle>
-            <TrendingUp className="h-5 w-5" />
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 sm:p-4">
+            <CardTitle className="text-xs sm:text-sm font-semibold">Total Inflow</CardTitle>
+            <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold mb-1">{formatCurrency(totalInflow)}</div>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold mb-1">{formatCurrency(totalInflow)}</div>
             <p className="text-xs text-white/90">Money received</p>
           </CardContent>
         </Card>
 
         <Card className="bg-gradient-to-br from-red-400 to-pink-500 text-white shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold">Total Outflow</CardTitle>
-            <TrendingDown className="h-5 w-5" />
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 sm:p-4">
+            <CardTitle className="text-xs sm:text-sm font-semibold">Total Outflow</CardTitle>
+            <TrendingDown className="h-4 w-4 sm:h-5 sm:w-5" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold mb-1">{formatCurrency(totalOutflow)}</div>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold mb-1">{formatCurrency(totalOutflow)}</div>
             <p className="text-xs text-white/90">Money disbursed</p>
           </CardContent>
         </Card>
 
         <Card className="bg-gradient-to-br from-purple-400 to-indigo-500 text-white shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold">Risk Days</CardTitle>
-            <AlertTriangle className="h-5 w-5" />
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 sm:p-4">
+            <CardTitle className="text-xs sm:text-sm font-semibold">Risk Days</CardTitle>
+            <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold mb-1">{negativeBalanceDays}</div>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold mb-1">{negativeBalanceDays}</div>
             <p className="text-xs text-white/90">Negative balance days</p>
           </CardContent>
         </Card>
@@ -396,12 +421,12 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
 
       {/* Manual Transaction Form - Light Theme */}
       {showForm && (
-        <Card className="bg-white shadow-lg border border-purple-200 rounded-2xl">
-          <CardHeader className="bg-gradient-to-r from-purple-100 to-indigo-100 border-b border-purple-200">
-            <CardTitle className="text-slate-800">Add Manual Transaction</CardTitle>
+        <Card className="bg-white shadow-lg border border-purple-200 rounded-xl sm:rounded-2xl">
+          <CardHeader className="bg-gradient-to-r from-purple-100 to-indigo-100 border-b border-purple-200 p-4 sm:p-6">
+            <CardTitle className="text-slate-800 text-lg sm:text-xl">Add Manual Transaction</CardTitle>
           </CardHeader>
-          <CardContent className="p-6">
-            <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <CardContent className="p-4 sm:p-6">
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               <div>
                 <Label htmlFor="date" className="text-slate-700">Date *</Label>
                 <Input
@@ -450,7 +475,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
                   className="mt-1 border-slate-300"
                 />
               </div>
-              <div className="sm:col-span-2 flex gap-4 pt-4">
+              <div className="sm:col-span-2 flex flex-col sm:flex-row gap-4 pt-4">
                 <Button 
                   type="submit" 
                   className="bg-purple-600 hover:bg-purple-700 text-white"
@@ -473,55 +498,55 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
       )}
 
       {/* Transaction History - Light Theme */}
-      <Card className="bg-white shadow-lg border border-slate-200 rounded-2xl overflow-hidden">
-        <CardHeader className="bg-gradient-to-r from-slate-100 to-slate-200 border-b border-slate-300">
-          <CardTitle className="flex items-center text-slate-800">
-            <BarChart3 className="mr-2 h-6 w-6" />
+      <Card className="bg-white shadow-lg border border-slate-200 rounded-xl sm:rounded-2xl overflow-hidden">
+        <CardHeader className="bg-gradient-to-r from-slate-100 to-slate-200 border-b border-slate-300 p-4 sm:p-6">
+          <CardTitle className="flex items-center text-slate-800 text-lg sm:text-xl">
+            <BarChart3 className="mr-2 h-5 w-5 sm:h-6 sm:w-6" />
             Transaction History ({transactionHistory.length} transactions)
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full min-w-[800px]">
               <thead className="bg-slate-100 border-b border-slate-200">
                 <tr>
-                  <th className="text-left p-4 font-semibold text-slate-700">Date</th>
-                  <th className="text-left p-4 font-semibold text-slate-700">Type</th>
-                  <th className="text-left p-4 font-semibold text-slate-700">Description</th>
-                  <th className="text-left p-4 font-semibold text-slate-700">Money In</th>
-                  <th className="text-left p-4 font-semibold text-slate-700">Money Out</th>
-                  <th className="text-left p-4 font-semibold text-slate-700">Balance</th>
+                  <th className="text-left p-3 sm:p-4 font-semibold text-slate-700 text-sm">Date</th>
+                  <th className="text-left p-3 sm:p-4 font-semibold text-slate-700 text-sm">Type</th>
+                  <th className="text-left p-3 sm:p-4 font-semibold text-slate-700 text-sm">Description</th>
+                  <th className="text-left p-3 sm:p-4 font-semibold text-slate-700 text-sm">Money In</th>
+                  <th className="text-left p-3 sm:p-4 font-semibold text-slate-700 text-sm">Money Out</th>
+                  <th className="text-left p-3 sm:p-4 font-semibold text-slate-700 text-sm">Balance</th>
                 </tr>
               </thead>
               <tbody>
                 {transactionHistory.map((transaction, index) => (
                   <tr key={transaction.id} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                    <td className="p-4 text-slate-700">{transaction.date}</td>
-                    <td className="p-4">
+                    <td className="p-3 sm:p-4 text-slate-700 text-sm">{transaction.date}</td>
+                    <td className="p-3 sm:p-4">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getTypeColor(transaction.type)}`}>
                         <span className="mr-1">{getTypeIcon(transaction.type)}</span>
                         {transaction.type}
                       </span>
                     </td>
-                    <td className="p-4 text-slate-800 max-w-xs truncate" title={transaction.description}>
+                    <td className="p-3 sm:p-4 text-slate-800 max-w-xs truncate text-sm" title={transaction.description}>
                       {transaction.description}
                     </td>
-                    <td className="p-4">
+                    <td className="p-3 sm:p-4">
                       {transaction.inflow > 0 ? (
-                        <span className="text-emerald-600 font-bold">{formatCurrency(transaction.inflow)}</span>
+                        <span className="text-emerald-600 font-bold text-sm">{formatCurrency(transaction.inflow)}</span>
                       ) : (
                         <span className="text-slate-300">-</span>
                       )}
                     </td>
-                    <td className="p-4">
+                    <td className="p-3 sm:p-4">
                       {transaction.outflow > 0 ? (
-                        <span className="text-red-600 font-bold">{formatCurrency(transaction.outflow)}</span>
+                        <span className="text-red-600 font-bold text-sm">{formatCurrency(transaction.outflow)}</span>
                       ) : (
                         <span className="text-slate-300">-</span>
                       )}
                     </td>
-                    <td className="p-4">
-                      <span className={`font-bold ${(transaction.balance || 0) < 0 ? 'text-red-600' : 'text-slate-800'}`}>
+                    <td className="p-3 sm:p-4">
+                      <span className={`font-bold text-sm ${(transaction.balance || 0) < 0 ? 'text-red-600' : 'text-slate-800'}`}>
                         {formatCurrency(transaction.balance || 0)}
                       </span>
                     </td>
