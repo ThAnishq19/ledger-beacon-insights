@@ -50,26 +50,42 @@ export const useFinanceData = () => {
 
   // Load data from localStorage on mount
   useEffect(() => {
-    const savedLoans = localStorage.getItem(STORAGE_KEYS.loans);
-    const savedCollections = localStorage.getItem(STORAGE_KEYS.collections);
-    const savedFunds = localStorage.getItem(STORAGE_KEYS.funds);
+    try {
+      const savedLoans = localStorage.getItem(STORAGE_KEYS.loans);
+      const savedCollections = localStorage.getItem(STORAGE_KEYS.collections);
+      const savedFunds = localStorage.getItem(STORAGE_KEYS.funds);
 
-    if (savedLoans) setLoans(JSON.parse(savedLoans));
-    if (savedCollections) setCollections(JSON.parse(savedCollections));
-    if (savedFunds) setFunds(JSON.parse(savedFunds));
+      if (savedLoans) setLoans(JSON.parse(savedLoans));
+      if (savedCollections) setCollections(JSON.parse(savedCollections));
+      if (savedFunds) setFunds(JSON.parse(savedFunds));
+    } catch (error) {
+      console.error('Error loading data from localStorage:', error);
+    }
   }, []);
 
   // Save to localStorage whenever data changes
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.loans, JSON.stringify(loans));
+    try {
+      localStorage.setItem(STORAGE_KEYS.loans, JSON.stringify(loans));
+    } catch (error) {
+      console.error('Error saving loans to localStorage:', error);
+    }
   }, [loans]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.collections, JSON.stringify(collections));
+    try {
+      localStorage.setItem(STORAGE_KEYS.collections, JSON.stringify(collections));
+    } catch (error) {
+      console.error('Error saving collections to localStorage:', error);
+    }
   }, [collections]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.funds, JSON.stringify(funds));
+    try {
+      localStorage.setItem(STORAGE_KEYS.funds, JSON.stringify(funds));
+    } catch (error) {
+      console.error('Error saving funds to localStorage:', error);
+    }
   }, [funds]);
 
   const calculateLoanMetrics = (loan: Omit<Loan, 'totalToReceive' | 'collected' | 'balance' | 'status' | 'profit'>) => {
@@ -79,10 +95,10 @@ export const useFinanceData = () => {
     // Calculate collected amount from collections
     const collected = collections
       .filter(c => c.loanId === loan.id)
-      .reduce((sum, c) => sum + c.amountPaid, 0);
+      .reduce((sum, c) => sum + (c.amountPaid || 0), 0);
     
     // Balance is what's still owed
-    const balance = totalToReceive - collected;
+    const balance = Math.max(0, totalToReceive - collected);
     
     // Status based on balance and disabled state
     let status: 'Ongoing' | 'Completed' | 'Disabled';
@@ -92,9 +108,8 @@ export const useFinanceData = () => {
       status = balance <= 0 ? 'Completed' : 'Ongoing';
     }
     
-    // Profit = deduction (upfront) + (collected - netGiven) for ongoing collections
-    // For completed loans, profit = loanAmount - netGiven
-    const profit = loan.deduction + (collected > loan.netGiven ? collected - loan.netGiven : 0);
+    // Profit calculation: deduction (upfront) + any excess collected
+    const profit = (loan.deduction || 0) + Math.max(0, collected - (loan.netGiven || 0));
     
     return {
       ...loan,
@@ -150,32 +165,70 @@ export const useFinanceData = () => {
   };
 
   const addFund = (fundData: Omit<Fund, 'balance'>) => {
-    // Get all transactions to calculate proper running balance
-    const allTransactions = [...funds, fundData].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
-    let runningBalance = 0;
-    const updatedFunds = allTransactions.map(fund => {
-      runningBalance += fund.inflow - fund.outflow;
-      return { ...fund, balance: runningBalance };
-    });
-    
-    setFunds(updatedFunds);
+    try {
+      console.log('Adding fund:', fundData);
+      
+      // Create new fund entry
+      const newFund = {
+        ...fundData,
+        id: fundData.id || `fund-${Date.now()}`,
+        inflow: Number(fundData.inflow) || 0,
+        outflow: Number(fundData.outflow) || 0,
+        balance: 0 // Will be calculated below
+      };
+
+      // Get all funds including the new one and sort by date
+      const allFunds = [...funds, newFund].sort((a, b) => 
+        new Date(a.date).getTime() - new Date(b.date).getTime()
+      );
+      
+      // Recalculate all balances
+      let runningBalance = 0;
+      const updatedFunds = allFunds.map(fund => {
+        runningBalance += fund.inflow - fund.outflow;
+        return { ...fund, balance: runningBalance };
+      });
+      
+      setFunds(updatedFunds);
+      console.log('Fund added successfully');
+    } catch (error) {
+      console.error('Error adding fund:', error);
+    }
   };
 
   const getLoanCashFlow = (loanId: string) => {
-    const loan = loans.find(l => l.id === loanId);
-    if (!loan) return null;
+    try {
+      const loan = loans.find(l => l.id === loanId);
+      if (!loan) {
+        console.log('Loan not found:', loanId);
+        return null;
+      }
 
-    const loanCollections = collections.filter(c => c.loanId === loanId);
-    
-    return {
-      loan,
-      collections: loanCollections,
-      totalInflow: loanCollections.reduce((sum, c) => sum + c.amountPaid, 0),
-      totalOutflow: loan.netGiven,
-      netFlow: loanCollections.reduce((sum, c) => sum + c.amountPaid, 0) - loan.netGiven,
-      profit: loan.profit
-    };
+      const loanCollections = collections.filter(c => c.loanId === loanId);
+      
+      const totalInflow = loanCollections.reduce((sum, c) => sum + (c.amountPaid || 0), 0);
+      const totalOutflow = loan.netGiven || 0;
+      const netFlow = totalInflow - totalOutflow;
+      
+      console.log('Cash flow calculated for loan:', loanId, {
+        totalInflow,
+        totalOutflow,
+        netFlow,
+        profit: loan.profit
+      });
+      
+      return {
+        loan,
+        collections: loanCollections,
+        totalInflow,
+        totalOutflow,
+        netFlow,
+        profit: loan.profit
+      };
+    } catch (error) {
+      console.error('Error calculating cash flow:', error);
+      return null;
+    }
   };
 
   return {

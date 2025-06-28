@@ -31,125 +31,175 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
   const [initialBalance, setInitialBalance] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
-    date: '',
+    date: new Date().toISOString().split('T')[0],
     description: '',
     inflow: '',
     outflow: '',
   });
 
-  // Simplified and optimized transaction history calculation
+  // Calculate transaction history with proper error handling
   const transactionHistory = useMemo(() => {
     console.log('Calculating transaction history...');
     
     try {
       const transactions: TransactionRow[] = [];
       
-      // Add fund entries
+      // Add manual fund entries
       if (funds && Array.isArray(funds)) {
         funds.forEach(fund => {
-          transactions.push({
-            id: fund.id,
-            date: fund.date,
-            description: fund.description,
-            inflow: fund.inflow || 0,
-            outflow: fund.outflow || 0,
-            balance: 0,
-            type: fund.description === 'Initial Balance' ? 'opening' : 'manual'
-          });
+          if (fund && fund.id) {
+            transactions.push({
+              id: fund.id,
+              date: fund.date || new Date().toISOString().split('T')[0],
+              description: fund.description || 'Manual transaction',
+              inflow: Number(fund.inflow) || 0,
+              outflow: Number(fund.outflow) || 0,
+              balance: Number(fund.balance) || 0,
+              type: fund.description === 'Initial Balance' ? 'opening' : 'manual'
+            });
+          }
         });
       }
 
       // Add loan disbursements (only enabled loans)
       if (loans && Array.isArray(loans)) {
         loans
-          .filter(loan => loan && !loan.isDisabled)
+          .filter(loan => loan && loan.id && !loan.isDisabled)
           .forEach(loan => {
             transactions.push({
               id: `loan-${loan.id}`,
-              date: loan.date,
-              description: `Loan to ${loan.customerName}`,
+              date: loan.date || new Date().toISOString().split('T')[0],
+              description: `Loan disbursed to ${loan.customerName || 'Unknown'}`,
               inflow: 0,
-              outflow: loan.netGiven || 0,
+              outflow: Number(loan.netGiven) || 0,
               balance: 0,
               type: 'loan'
             });
           });
       }
 
-      // Add collections by date
+      // Add collections grouped by date
       if (collections && Array.isArray(collections)) {
         const collectionsByDate = new Map<string, Collection[]>();
         
         collections.forEach(collection => {
-          if (collection && collection.date) {
-            const existing = collectionsByDate.get(collection.date) || [];
+          if (collection && collection.date && collection.amountPaid) {
+            const date = collection.date;
+            const existing = collectionsByDate.get(date) || [];
             existing.push(collection);
-            collectionsByDate.set(collection.date, existing);
+            collectionsByDate.set(date, existing);
           }
         });
 
         collectionsByDate.forEach((dayCollections, date) => {
-          const totalAmount = dayCollections.reduce((sum, c) => sum + (c.amountPaid || 0), 0);
+          const totalAmount = dayCollections.reduce((sum, c) => sum + (Number(c.amountPaid) || 0), 0);
           
-          transactions.push({
-            id: `collection-${date}`,
-            date,
-            description: `Daily collections (${dayCollections.length} payments)`,
-            inflow: totalAmount,
-            outflow: 0,
-            balance: 0,
-            type: 'collection'
-          });
+          if (totalAmount > 0) {
+            transactions.push({
+              id: `collection-${date}`,
+              date,
+              description: `Collections received (${dayCollections.length} payment${dayCollections.length > 1 ? 's' : ''})`,
+              inflow: totalAmount,
+              outflow: 0,
+              balance: 0,
+              type: 'collection'
+            });
+          }
         });
       }
 
-      // Sort by date
+      // Sort transactions by date
       transactions.sort((a, b) => {
         const dateA = new Date(a.date).getTime();
         const dateB = new Date(b.date).getTime();
+        if (dateA === dateB) {
+          // If same date, prioritize: opening -> manual -> loan -> collection
+          const priority = { opening: 0, manual: 1, loan: 2, collection: 3 };
+          return priority[a.type] - priority[b.type];
+        }
         return dateA - dateB;
       });
 
-      // Calculate running balance
+      // Recalculate running balances for non-fund transactions
       let runningBalance = 0;
-      transactions.forEach(transaction => {
-        runningBalance += (transaction.inflow || 0) - (transaction.outflow || 0);
-        transaction.balance = runningBalance;
+      
+      // First pass: get the final balance from funds
+      if (funds.length > 0) {
+        const sortedFunds = [...funds].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        runningBalance = sortedFunds[sortedFunds.length - 1]?.balance || 0;
+      }
+
+      // Second pass: apply loan and collection transactions
+      const nonFundTransactions = transactions.filter(t => t.type === 'loan' || t.type === 'collection');
+      nonFundTransactions.forEach(transaction => {
+        if (transaction.type === 'loan') {
+          runningBalance -= transaction.outflow;
+        } else if (transaction.type === 'collection') {
+          runningBalance += transaction.inflow;
+        }
       });
 
-      console.log('Transaction history calculated successfully');
+      // Third pass: update balances for all transactions
+      let currentBalance = 0;
+      transactions.forEach(transaction => {
+        if (transaction.type === 'manual' || transaction.type === 'opening') {
+          // Use the balance from the fund record
+          currentBalance = transaction.balance;
+        } else {
+          // Calculate balance for loan/collection transactions
+          currentBalance += transaction.inflow - transaction.outflow;
+          transaction.balance = currentBalance;
+        }
+      });
+
+      console.log('Transaction history calculated successfully:', transactions.length, 'transactions');
       return transactions;
     } catch (error) {
       console.error('Error calculating transaction history:', error);
       return [];
     }
-  }, [funds?.length, loans?.length, collections?.length]); // Use length instead of full arrays
+  }, [funds, loans, collections]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     
     try {
-      if (!formData.description || (!formData.inflow && !formData.outflow)) {
+      if (!formData.description.trim()) {
         toast({
           title: "Validation Error",
-          description: "Please fill in description and at least one amount field",
+          description: "Please enter a description",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const inflowAmount = parseFloat(formData.inflow) || 0;
+      const outflowAmount = parseFloat(formData.outflow) || 0;
+
+      if (inflowAmount === 0 && outflowAmount === 0) {
+        toast({
+          title: "Validation Error",
+          description: "Please enter either an inflow or outflow amount",
           variant: "destructive",
         });
         return;
       }
 
       const newFund = {
-        id: Date.now().toString(),
-        date: formData.date || new Date().toISOString().split('T')[0],
-        description: formData.description,
-        inflow: parseFloat(formData.inflow) || 0,
-        outflow: parseFloat(formData.outflow) || 0,
+        id: `manual-${Date.now()}`,
+        date: formData.date,
+        description: formData.description.trim(),
+        inflow: inflowAmount,
+        outflow: outflowAmount,
       };
 
+      console.log('Submitting fund:', newFund);
       onAddFund(newFund);
+      
+      // Reset form
       setFormData({
-        date: '',
+        date: new Date().toISOString().split('T')[0],
         description: '',
         inflow: '',
         outflow: '',
@@ -158,13 +208,13 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
       
       toast({
         title: "Success",
-        description: "Transaction recorded successfully",
+        description: "Transaction added successfully",
       });
     } catch (error) {
       console.error('Error adding fund:', error);
       toast({
         title: "Error",
-        description: "Failed to add transaction",
+        description: "Failed to add transaction. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -173,10 +223,10 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
   };
 
   const handleInitialBalance = async () => {
-    if (!initialBalance) {
+    if (!initialBalance || isNaN(parseFloat(initialBalance))) {
       toast({
         title: "Validation Error",
-        description: "Please enter an initial balance",
+        description: "Please enter a valid initial balance",
         variant: "destructive",
       });
       return;
@@ -192,6 +242,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
         outflow: 0,
       };
 
+      console.log('Setting initial balance:', newFund);
       onAddFund(newFund);
       setInitialBalance('');
       
@@ -211,11 +262,14 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
     }
   };
 
-  // Calculate summary metrics safely
-  const currentBalance = transactionHistory.length > 0 ? transactionHistory[transactionHistory.length - 1].balance : 0;
+  // Calculate summary metrics
+  const currentBalance = transactionHistory.length > 0 
+    ? transactionHistory[transactionHistory.length - 1]?.balance || 0 
+    : 0;
+  
   const totalInflow = transactionHistory.reduce((sum, t) => sum + (t.inflow || 0), 0);
   const totalOutflow = transactionHistory.reduce((sum, t) => sum + (t.outflow || 0), 0);
-  const negativeBalanceDays = transactionHistory.filter(t => t.balance < 0).length;
+  const negativeBalanceDays = transactionHistory.filter(t => (t.balance || 0) < 0).length;
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -235,6 +289,15 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
     }
   };
 
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount || 0);
+  };
+
   return (
     <div className="space-y-6 p-4">
       {/* Header Section */}
@@ -242,18 +305,18 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
           <div className="flex-1">
             <h2 className="text-3xl font-bold mb-2">Fund Tracker</h2>
-            <p className="text-indigo-200">Automated cash flow tracking with real-time balance updates</p>
+            <p className="text-indigo-200">Monitor cash flow and track all financial transactions</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
-            {transactionHistory.length === 0 && (
+            {funds.length === 0 && (
               <div className="flex gap-2 items-center">
                 <Input
                   type="number"
                   step="0.01"
                   value={initialBalance}
                   onChange={(e) => setInitialBalance(e.target.value)}
-                  placeholder="Initial balance"
-                  className="w-40 bg-white/10 border-white/20 text-white placeholder-white/60"
+                  placeholder="Enter initial balance"
+                  className="w-48 bg-white/10 border-white/20 text-white placeholder-white/60"
                 />
                 <Button 
                   onClick={handleInitialBalance} 
@@ -285,7 +348,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
             <DollarSign className="h-5 w-5" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold mb-1">${currentBalance.toLocaleString()}</div>
+            <div className="text-2xl font-bold mb-1">{formatCurrency(currentBalance)}</div>
             <p className="text-xs text-white/80">Available cash</p>
           </CardContent>
         </Card>
@@ -296,7 +359,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
             <TrendingUp className="h-5 w-5" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold mb-1">${totalInflow.toLocaleString()}</div>
+            <div className="text-2xl font-bold mb-1">{formatCurrency(totalInflow)}</div>
             <p className="text-xs text-white/80">Money received</p>
           </CardContent>
         </Card>
@@ -307,7 +370,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
             <TrendingDown className="h-5 w-5" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold mb-1">${totalOutflow.toLocaleString()}</div>
+            <div className="text-2xl font-bold mb-1">{formatCurrency(totalOutflow)}</div>
             <p className="text-xs text-white/80">Money disbursed</p>
           </CardContent>
         </Card>
@@ -333,13 +396,14 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
           <CardContent className="p-6">
             <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
-                <Label htmlFor="date">Date</Label>
+                <Label htmlFor="date">Date *</Label>
                 <Input
                   id="date"
                   type="date"
                   value={formData.date}
                   onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
                   className="mt-1"
+                  required
                 />
               </div>
               <div>
@@ -350,29 +414,32 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   placeholder="Enter transaction description"
                   className="mt-1"
+                  required
                 />
               </div>
               <div>
-                <Label htmlFor="inflow">Inflow (Money In)</Label>
+                <Label htmlFor="inflow">Money In (Inflow)</Label>
                 <Input
                   id="inflow"
                   type="number"
                   step="0.01"
+                  min="0"
                   value={formData.inflow}
                   onChange={(e) => setFormData(prev => ({ ...prev, inflow: e.target.value }))}
-                  placeholder="Enter inflow amount"
+                  placeholder="0.00"
                   className="mt-1"
                 />
               </div>
               <div>
-                <Label htmlFor="outflow">Outflow (Money Out)</Label>
+                <Label htmlFor="outflow">Money Out (Outflow)</Label>
                 <Input
                   id="outflow"
                   type="number"
                   step="0.01"
+                  min="0"
                   value={formData.outflow}
                   onChange={(e) => setFormData(prev => ({ ...prev, outflow: e.target.value }))}
-                  placeholder="Enter outflow amount"
+                  placeholder="0.00"
                   className="mt-1"
                 />
               </div>
@@ -402,7 +469,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
         <CardHeader className="bg-gradient-to-r from-slate-800 to-slate-700 text-white">
           <CardTitle className="flex items-center">
             <BarChart3 className="mr-2 h-6 w-6" />
-            Transaction History
+            Transaction History ({transactionHistory.length} transactions)
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -413,8 +480,8 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
                   <th className="text-left p-4 font-semibold text-slate-700">Date</th>
                   <th className="text-left p-4 font-semibold text-slate-700">Type</th>
                   <th className="text-left p-4 font-semibold text-slate-700">Description</th>
-                  <th className="text-left p-4 font-semibold text-slate-700">Inflow</th>
-                  <th className="text-left p-4 font-semibold text-slate-700">Outflow</th>
+                  <th className="text-left p-4 font-semibold text-slate-700">Money In</th>
+                  <th className="text-left p-4 font-semibold text-slate-700">Money Out</th>
                   <th className="text-left p-4 font-semibold text-slate-700">Balance</th>
                 </tr>
               </thead>
@@ -433,21 +500,21 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
                     </td>
                     <td className="p-4">
                       {transaction.inflow > 0 ? (
-                        <span className="text-emerald-600 font-bold">${transaction.inflow.toLocaleString()}</span>
+                        <span className="text-emerald-600 font-bold">{formatCurrency(transaction.inflow)}</span>
                       ) : (
                         <span className="text-slate-300">-</span>
                       )}
                     </td>
                     <td className="p-4">
                       {transaction.outflow > 0 ? (
-                        <span className="text-red-600 font-bold">${transaction.outflow.toLocaleString()}</span>
+                        <span className="text-red-600 font-bold">{formatCurrency(transaction.outflow)}</span>
                       ) : (
                         <span className="text-slate-300">-</span>
                       )}
                     </td>
                     <td className="p-4">
-                      <span className={`font-bold ${transaction.balance < 0 ? 'text-red-600' : 'text-slate-800'}`}>
-                        ${transaction.balance.toLocaleString()}
+                      <span className={`font-bold ${(transaction.balance || 0) < 0 ? 'text-red-600' : 'text-slate-800'}`}>
+                        {formatCurrency(transaction.balance || 0)}
                       </span>
                     </td>
                   </tr>
