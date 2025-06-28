@@ -37,6 +37,15 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
     outflow: '',
   });
 
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount || 0);
+  };
+
   // Calculate transaction history with proper error handling
   const transactionHistory = useMemo(() => {
     console.log('Calculating transaction history...');
@@ -162,6 +171,14 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    console.log('Form submission started with data:', formData);
+    
+    if (isLoading) {
+      console.log('Already loading, preventing duplicate submission');
+      return;
+    }
+    
     setIsLoading(true);
     
     try {
@@ -171,6 +188,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
           description: "Please enter a description",
           variant: "destructive",
         });
+        setIsLoading(false);
         return;
       }
 
@@ -183,11 +201,12 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
           description: "Please enter either an inflow or outflow amount",
           variant: "destructive",
         });
+        setIsLoading(false);
         return;
       }
 
       const newFund = {
-        id: `manual-${Date.now()}`,
+        id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         date: formData.date,
         description: formData.description.trim(),
         inflow: inflowAmount,
@@ -195,7 +214,10 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
       };
 
       console.log('Submitting fund:', newFund);
-      onAddFund(newFund);
+      
+      await onAddFund(newFund);
+      
+      console.log('Fund submitted successfully');
       
       // Reset form
       setFormData({
@@ -243,7 +265,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
       };
 
       console.log('Setting initial balance:', newFund);
-      onAddFund(newFund);
+      await onAddFund(newFund);
       setInitialBalance('');
       
       toast({
@@ -282,30 +304,21 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
 
   const getTypeColor = (type: string) => {
     switch (type) {
-      case 'loan': return 'text-red-600 bg-red-50';
-      case 'collection': return 'text-emerald-600 bg-emerald-50';
-      case 'opening': return 'text-blue-600 bg-blue-50';
-      default: return 'text-purple-600 bg-purple-50';
+      case 'loan': return 'text-red-600 bg-red-100 border border-red-200';
+      case 'collection': return 'text-emerald-600 bg-emerald-100 border border-emerald-200';
+      case 'opening': return 'text-blue-600 bg-blue-100 border border-blue-200';
+      default: return 'text-purple-600 bg-purple-100 border border-purple-200';
     }
-  };
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount || 0);
   };
 
   return (
     <div className="space-y-6 p-4">
-      {/* Header Section */}
-      <div className="bg-gradient-to-r from-indigo-900 via-purple-800 to-indigo-900 rounded-2xl p-6 text-white shadow-2xl">
+      {/* Header Section - Light Theme */}
+      <div className="bg-gradient-to-r from-indigo-100 via-purple-100 to-indigo-100 border border-indigo-200 rounded-2xl p-6 shadow-lg">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
           <div className="flex-1">
-            <h2 className="text-3xl font-bold mb-2">Fund Tracker</h2>
-            <p className="text-indigo-200">Monitor cash flow and track all financial transactions</p>
+            <h2 className="text-3xl font-bold mb-2 text-slate-800">Fund Tracker</h2>
+            <p className="text-slate-600">Monitor cash flow and track all financial transactions</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
             {funds.length === 0 && (
@@ -316,12 +329,12 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
                   value={initialBalance}
                   onChange={(e) => setInitialBalance(e.target.value)}
                   placeholder="Enter initial balance"
-                  className="w-48 bg-white/10 border-white/20 text-white placeholder-white/60"
+                  className="w-48 bg-white border-slate-300"
                 />
                 <Button 
                   onClick={handleInitialBalance} 
                   variant="outline" 
-                  className="bg-white/10 border-white/30 text-white hover:bg-white/20"
+                  className="bg-white border-slate-300 text-slate-700 hover:bg-slate-50"
                   disabled={isLoading}
                 >
                   Set Balance
@@ -330,7 +343,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
             )}
             <Button 
               onClick={() => setShowForm(!showForm)}
-              className="bg-white text-indigo-800 hover:bg-indigo-50 px-6 py-3 rounded-lg shadow-lg font-semibold"
+              className="bg-indigo-600 text-white hover:bg-indigo-700 px-6 py-3 rounded-lg shadow-lg font-semibold"
               disabled={isLoading}
             >
               <Plus className="mr-2 h-5 w-5" />
@@ -340,85 +353,85 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* Summary Cards - Light Colors */}
       <div className="grid gap-6 grid-cols-2 lg:grid-cols-4">
-        <Card className="bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-xl">
+        <Card className="bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-lg">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-semibold">Current Balance</CardTitle>
             <DollarSign className="h-5 w-5" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold mb-1">{formatCurrency(currentBalance)}</div>
-            <p className="text-xs text-white/80">Available cash</p>
+            <p className="text-xs text-white/90">Available cash</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-xl">
+        <Card className="bg-gradient-to-br from-blue-400 to-indigo-500 text-white shadow-lg">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-semibold">Total Inflow</CardTitle>
             <TrendingUp className="h-5 w-5" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold mb-1">{formatCurrency(totalInflow)}</div>
-            <p className="text-xs text-white/80">Money received</p>
+            <p className="text-xs text-white/90">Money received</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-red-600 to-pink-700 text-white shadow-xl">
+        <Card className="bg-gradient-to-br from-red-400 to-pink-500 text-white shadow-lg">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-semibold">Total Outflow</CardTitle>
             <TrendingDown className="h-5 w-5" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold mb-1">{formatCurrency(totalOutflow)}</div>
-            <p className="text-xs text-white/80">Money disbursed</p>
+            <p className="text-xs text-white/90">Money disbursed</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-purple-600 to-indigo-700 text-white shadow-xl">
+        <Card className="bg-gradient-to-br from-purple-400 to-indigo-500 text-white shadow-lg">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-semibold">Risk Days</CardTitle>
             <AlertTriangle className="h-5 w-5" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold mb-1">{negativeBalanceDays}</div>
-            <p className="text-xs text-white/80">Negative balance days</p>
+            <p className="text-xs text-white/90">Negative balance days</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Manual Transaction Form */}
+      {/* Manual Transaction Form - Light Theme */}
       {showForm && (
-        <Card className="bg-white shadow-2xl border-0 rounded-2xl">
-          <CardHeader className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
-            <CardTitle>Add Manual Transaction</CardTitle>
+        <Card className="bg-white shadow-lg border border-purple-200 rounded-2xl">
+          <CardHeader className="bg-gradient-to-r from-purple-100 to-indigo-100 border-b border-purple-200">
+            <CardTitle className="text-slate-800">Add Manual Transaction</CardTitle>
           </CardHeader>
           <CardContent className="p-6">
             <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
-                <Label htmlFor="date">Date *</Label>
+                <Label htmlFor="date" className="text-slate-700">Date *</Label>
                 <Input
                   id="date"
                   type="date"
                   value={formData.date}
                   onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
-                  className="mt-1"
+                  className="mt-1 border-slate-300"
                   required
                 />
               </div>
               <div>
-                <Label htmlFor="description">Description *</Label>
+                <Label htmlFor="description" className="text-slate-700">Description *</Label>
                 <Input
                   id="description"
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   placeholder="Enter transaction description"
-                  className="mt-1"
+                  className="mt-1 border-slate-300"
                   required
                 />
               </div>
               <div>
-                <Label htmlFor="inflow">Money In (Inflow)</Label>
+                <Label htmlFor="inflow" className="text-slate-700">Money In (Inflow)</Label>
                 <Input
                   id="inflow"
                   type="number"
@@ -427,11 +440,11 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
                   value={formData.inflow}
                   onChange={(e) => setFormData(prev => ({ ...prev, inflow: e.target.value }))}
                   placeholder="0.00"
-                  className="mt-1"
+                  className="mt-1 border-slate-300"
                 />
               </div>
               <div>
-                <Label htmlFor="outflow">Money Out (Outflow)</Label>
+                <Label htmlFor="outflow" className="text-slate-700">Money Out (Outflow)</Label>
                 <Input
                   id="outflow"
                   type="number"
@@ -440,13 +453,13 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
                   value={formData.outflow}
                   onChange={(e) => setFormData(prev => ({ ...prev, outflow: e.target.value }))}
                   placeholder="0.00"
-                  className="mt-1"
+                  className="mt-1 border-slate-300"
                 />
               </div>
               <div className="sm:col-span-2 flex gap-4 pt-4">
                 <Button 
                   type="submit" 
-                  className="bg-purple-600 hover:bg-purple-700"
+                  className="bg-purple-600 hover:bg-purple-700 text-white"
                   disabled={isLoading}
                 >
                   {isLoading ? 'Adding...' : 'Add Transaction'}
@@ -455,6 +468,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
                   type="button" 
                   variant="outline" 
                   onClick={() => setShowForm(false)}
+                  className="border-slate-300 text-slate-700 hover:bg-slate-50"
                 >
                   Cancel
                 </Button>
@@ -464,10 +478,10 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
         </Card>
       )}
 
-      {/* Transaction History */}
-      <Card className="bg-white shadow-2xl border-0 rounded-2xl overflow-hidden">
-        <CardHeader className="bg-gradient-to-r from-slate-800 to-slate-700 text-white">
-          <CardTitle className="flex items-center">
+      {/* Transaction History - Light Theme */}
+      <Card className="bg-white shadow-lg border border-slate-200 rounded-2xl overflow-hidden">
+        <CardHeader className="bg-gradient-to-r from-slate-100 to-slate-200 border-b border-slate-300">
+          <CardTitle className="flex items-center text-slate-800">
             <BarChart3 className="mr-2 h-6 w-6" />
             Transaction History ({transactionHistory.length} transactions)
           </CardTitle>
@@ -475,7 +489,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-slate-50">
+              <thead className="bg-slate-100 border-b border-slate-200">
                 <tr>
                   <th className="text-left p-4 font-semibold text-slate-700">Date</th>
                   <th className="text-left p-4 font-semibold text-slate-700">Type</th>
