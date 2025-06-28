@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,15 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
     dailyPay: '',
     days: '',
   });
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount || 0);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -285,13 +295,13 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
                     <td className="p-2 font-medium text-slate-800">{loan.id}</td>
                     <td className="p-2 text-slate-700">{loan.customerName}</td>
                     <td className="p-2 text-slate-600">{loan.date}</td>
-                    <td className="p-2 text-slate-700">${loan.loanAmount.toLocaleString()}</td>
-                    <td className="p-2 text-slate-700">${loan.netGiven.toLocaleString()}</td>
-                    <td className="p-2 text-slate-700">${loan.dailyPay.toLocaleString()}</td>
+                    <td className="p-2 text-slate-700">{formatCurrency(loan.loanAmount)}</td>
+                    <td className="p-2 text-slate-700">{formatCurrency(loan.netGiven)}</td>
+                    <td className="p-2 text-slate-700">{formatCurrency(loan.dailyPay)}</td>
                     <td className="p-2 text-slate-700">{loan.days}</td>
-                    <td className="p-2 text-slate-700">${loan.totalToReceive.toLocaleString()}</td>
-                    <td className="p-2 text-emerald-600 font-medium">${loan.collected.toLocaleString()}</td>
-                    <td className="p-2 text-red-600 font-medium">${loan.balance.toLocaleString()}</td>
+                    <td className="p-2 text-slate-700">{formatCurrency(loan.totalToReceive)}</td>
+                    <td className="p-2 text-emerald-600 font-medium">{formatCurrency(loan.collected)}</td>
+                    <td className="p-2 text-red-600 font-medium">{formatCurrency(loan.balance)}</td>
                     <td className="p-2">
                       <Badge variant={
                         loan.status === 'Completed' ? 'default' : 
@@ -301,7 +311,7 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
                         {loan.status}
                       </Badge>
                     </td>
-                    <td className="p-2 text-purple-600 font-medium">${loan.profit.toLocaleString()}</td>
+                    <td className="p-2 text-purple-600 font-medium">{formatCurrency(loan.profit)}</td>
                   </tr>
                 ))}
               </tbody>

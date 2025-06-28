@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,6 +17,7 @@ interface FundTrackerProps {
 interface TransactionRow {
   id: string;
   date: string;
+  datetime: Date;
   description: string;
   inflow: number;
   outflow: number;
@@ -46,20 +46,22 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
     }).format(amount || 0);
   };
 
-  // Calculate transaction history with proper error handling
+  // Calculate transaction history with proper date/time sorting
   const transactionHistory = useMemo(() => {
     console.log('Calculating transaction history...');
     
     try {
       const transactions: TransactionRow[] = [];
       
-      // Add manual fund entries
+      // Add manual fund entries with proper datetime
       if (funds && Array.isArray(funds)) {
         funds.forEach(fund => {
           if (fund && fund.id) {
+            const fundDate = new Date(fund.date || new Date().toISOString().split('T')[0]);
             transactions.push({
               id: fund.id,
               date: fund.date || new Date().toISOString().split('T')[0],
+              datetime: fundDate,
               description: fund.description || 'Manual transaction',
               inflow: Number(fund.inflow) || 0,
               outflow: Number(fund.outflow) || 0,
@@ -70,14 +72,19 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
         });
       }
 
-      // Add loan disbursements (only enabled loans)
+      // Add loan disbursements (only enabled loans) with proper datetime
       if (loans && Array.isArray(loans)) {
         loans
           .filter(loan => loan && loan.id && !loan.isDisabled)
           .forEach(loan => {
+            const loanDate = new Date(loan.date || new Date().toISOString().split('T')[0]);
+            // Add 1 hour to loan disbursement to ensure proper ordering
+            loanDate.setHours(loanDate.getHours() + 1);
+            
             transactions.push({
               id: `loan-${loan.id}`,
               date: loan.date || new Date().toISOString().split('T')[0],
+              datetime: loanDate,
               description: `Loan disbursed to ${loan.customerName || 'Unknown'}`,
               inflow: 0,
               outflow: Number(loan.netGiven) || 0,
@@ -87,7 +94,7 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
           });
       }
 
-      // Add collections grouped by date
+      // Add collections with proper datetime grouping by date
       if (collections && Array.isArray(collections)) {
         const collectionsByDate = new Map<string, Collection[]>();
         
@@ -104,9 +111,14 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
           const totalAmount = dayCollections.reduce((sum, c) => sum + (Number(c.amountPaid) || 0), 0);
           
           if (totalAmount > 0) {
+            const collectionDate = new Date(date);
+            // Add 2 hours to collections to ensure proper ordering after loans
+            collectionDate.setHours(collectionDate.getHours() + 2);
+            
             transactions.push({
               id: `collection-${date}`,
               date,
+              datetime: collectionDate,
               description: `Collections received (${dayCollections.length} payment${dayCollections.length > 1 ? 's' : ''})`,
               inflow: totalAmount,
               outflow: 0,
@@ -117,47 +129,29 @@ const FundTracker: React.FC<FundTrackerProps> = ({ funds, loans, collections, on
         });
       }
 
-      // Sort transactions by date
+      // Sort transactions by datetime for proper chronological order
       transactions.sort((a, b) => {
-        const dateA = new Date(a.date).getTime();
-        const dateB = new Date(b.date).getTime();
-        if (dateA === dateB) {
-          // If same date, prioritize: opening -> manual -> loan -> collection
+        const timeA = a.datetime.getTime();
+        const timeB = b.datetime.getTime();
+        if (timeA === timeB) {
+          // If same datetime, prioritize: opening -> manual -> loan -> collection
           const priority = { opening: 0, manual: 1, loan: 2, collection: 3 };
           return priority[a.type] - priority[b.type];
         }
-        return dateA - dateB;
+        return timeA - timeB;
       });
 
-      // Recalculate running balances for non-fund transactions
+      // Recalculate running balances
       let runningBalance = 0;
       
-      // First pass: get the final balance from funds
-      if (funds.length > 0) {
-        const sortedFunds = [...funds].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        runningBalance = sortedFunds[sortedFunds.length - 1]?.balance || 0;
-      }
-
-      // Second pass: apply loan and collection transactions
-      const nonFundTransactions = transactions.filter(t => t.type === 'loan' || t.type === 'collection');
-      nonFundTransactions.forEach(transaction => {
-        if (transaction.type === 'loan') {
-          runningBalance -= transaction.outflow;
-        } else if (transaction.type === 'collection') {
-          runningBalance += transaction.inflow;
-        }
-      });
-
-      // Third pass: update balances for all transactions
-      let currentBalance = 0;
       transactions.forEach(transaction => {
         if (transaction.type === 'manual' || transaction.type === 'opening') {
-          // Use the balance from the fund record
-          currentBalance = transaction.balance;
+          // For manual transactions, use the stored balance
+          runningBalance = transaction.balance;
         } else {
-          // Calculate balance for loan/collection transactions
-          currentBalance += transaction.inflow - transaction.outflow;
-          transaction.balance = currentBalance;
+          // For loan/collection transactions, calculate balance
+          runningBalance += transaction.inflow - transaction.outflow;
+          transaction.balance = runningBalance;
         }
       });
 
