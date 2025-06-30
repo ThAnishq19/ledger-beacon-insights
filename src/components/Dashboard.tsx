@@ -1,9 +1,12 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loan, Collection, Fund } from "@/hooks/useFinanceData";
-import { TrendingUp, TrendingDown, DollarSign, Target, Wallet, AlertCircle, PieChart, BarChart3, Download } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Target, Wallet, AlertCircle, PieChart, BarChart3, Download, Clock, Users, Calendar, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LineChart, Line } from "recharts";
 
 interface DashboardProps {
   loans: Loan[];
@@ -12,6 +15,8 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
+  const [activeSection, setActiveSection] = useState('overview');
+
   const calculateMetrics = () => {
     // Get current balance from fund tracker
     const sortedFunds = [...funds].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -41,27 +46,57 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
     // Total amount invested (net given to customers)
     const totalInvestedAmount = loans.reduce((sum, loan) => sum + loan.netGiven, 0);
     
-    // Total loan amount disbursed (for tracking)
-    const totalLoanAmountDisbursed = loans.reduce((sum, loan) => sum + loan.netGiven, 0);
-    
     // Total collections received
     const totalCollections = collections.reduce((sum, collection) => sum + collection.amountPaid, 0);
     
-    // Outstanding amount (what customers still owe)
-    const outstandingAmount = loans.reduce((sum, loan) => sum + loan.balance, 0);
+    // Fixed Outstanding amount calculation: Total loan amount - collected amount for active loans only
+    const outstandingAmount = loans
+      .filter(loan => !loan.isDisabled && loan.status !== 'Completed')
+      .reduce((sum, loan) => {
+        const loanCollected = collections
+          .filter(c => c.loanId === loan.id)
+          .reduce((total, c) => total + c.amountPaid, 0);
+        return sum + Math.max(0, loan.loanAmount - loanCollected);
+      }, 0);
     
     // Expected profit calculation: deduction + (loan amount - net given)
     const expectedProfit = loans.reduce((sum, loan) => {
       return sum + loan.deduction + (loan.loanAmount - loan.netGiven);
     }, 0);
 
+    // Near to closing customers (10 days buffer)
+    const nearToClosingCustomers = loans.filter(loan => {
+      if (loan.status === 'Completed' || loan.isDisabled) return false;
+      const remainingAmount = Math.max(0, loan.loanAmount - loan.collected);
+      const remainingDays = Math.ceil(remainingAmount / loan.dailyPay);
+      return remainingDays <= 10 && remainingDays > 0;
+    });
+
+    // Payment delay customers (3+ days)
+    const today = new Date();
+    const paymentDelayCustomers = loans.filter(loan => {
+      if (loan.status === 'Completed' || loan.isDisabled) return false;
+      const lastCollection = collections
+        .filter(c => c.loanId === loan.id)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+      
+      if (!lastCollection) {
+        const daysSinceLoan = Math.floor((today.getTime() - new Date(loan.date).getTime()) / (1000 * 60 * 60 * 24));
+        return daysSinceLoan >= 3;
+      }
+      
+      const daysSinceLastPayment = Math.floor((today.getTime() - new Date(lastCollection.date).getTime()) / (1000 * 60 * 60 * 24));
+      return daysSinceLastPayment >= 3;
+    });
+
     return {
       cashInHand,
       totalInvestedAmount,
-      totalLoanAmountDisbursed,
       totalCollections,
       outstandingAmount,
       expectedProfit,
+      nearToClosingCustomers,
+      paymentDelayCustomers,
     };
   };
 
@@ -76,6 +111,35 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
     }).format(amount || 0);
   };
 
+  // Chart data preparation
+  const monthlyData = loans.reduce((acc, loan) => {
+    const month = new Date(loan.date).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+    const existing = acc.find(item => item.month === month);
+    if (existing) {
+      existing.loans += 1;
+      existing.amount += loan.netGiven;
+    } else {
+      acc.push({ month, loans: 1, amount: loan.netGiven, collections: 0 });
+    }
+    return acc;
+  }, [] as Array<{ month: string; loans: number; amount: number; collections: number }>);
+
+  // Add collections data
+  collections.forEach(collection => {
+    const month = new Date(collection.date).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+    const existing = monthlyData.find(item => item.month === month);
+    if (existing) {
+      existing.collections += collection.amountPaid;
+    }
+  });
+
+  const customerStatusData = [
+    { name: 'Active', value: loans.filter(l => l.status === 'Ongoing').length, color: '#10b981' },
+    { name: 'Completed', value: loans.filter(l => l.status === 'Completed').length, color: '#3b82f6' },
+    { name: 'Near Closing', value: metrics.nearToClosingCustomers.length, color: '#f59e0b' },
+    { name: 'Payment Delayed', value: metrics.paymentDelayCustomers.length, color: '#ef4444' },
+  ];
+
   const downloadBalanceSheet = () => {
     const balanceSheetData = {
       date: new Date().toLocaleDateString('en-IN'),
@@ -89,7 +153,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
         customer: loan.customerName,
         amountGiven: loan.netGiven,
         amountReceived: loan.collected,
-        balance: loan.balance,
+        balance: Math.max(0, loan.loanAmount - loan.collected),
       })),
       collectionDetails: collections.map(collection => ({
         date: collection.date,
@@ -207,199 +271,429 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
     title, 
     value, 
     icon: Icon, 
-    bgGradient,
-    isPositive,
-    subtitle
+    gradient,
+    textColor = "white",
+    subtitle,
+    trend
   }: { 
     title: string; 
-    value: number; 
+    value: number | string; 
     icon: any; 
-    bgGradient: string;
-    isPositive?: boolean;
+    gradient: string;
+    textColor?: string;
     subtitle?: string;
+    trend?: { value: number; isPositive: boolean };
   }) => (
-    <Card className={`relative overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 ${bgGradient} border-0`}>
+    <div className={`relative overflow-hidden rounded-3xl p-6 shadow-2xl hover:shadow-3xl transition-all duration-500 transform hover:-translate-y-3 hover:scale-105 ${gradient}`}>
       <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
-      <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-3 px-4 sm:px-6 pt-4 sm:pt-6">
-        <CardTitle className="text-sm sm:text-base font-bold text-white leading-tight">{title}</CardTitle>
-        <div className="p-2 sm:p-3 rounded-full bg-white/20 backdrop-blur-sm flex-shrink-0">
-          <Icon className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+      <div className="absolute top-4 right-4 opacity-20">
+        <Icon className="h-16 w-16" />
+      </div>
+      <div className="relative z-10">
+        <div className="flex items-center justify-between mb-4">
+          <div className={`p-3 rounded-2xl bg-white/20 backdrop-blur-sm`}>
+            <Icon className={`h-6 w-6 ${textColor === 'white' ? 'text-white' : 'text-gray-800'}`} />
+          </div>
+          {trend && (
+            <div className={`flex items-center space-x-1 px-3 py-1 rounded-full bg-white/20 backdrop-blur-sm`}>
+              {trend.isPositive ? 
+                <TrendingUp className="h-4 w-4 text-white" /> : 
+                <TrendingDown className="h-4 w-4 text-white" />
+              }
+              <span className="text-sm font-medium text-white">{Math.abs(trend.value)}%</span>
+            </div>
+          )}
         </div>
-      </CardHeader>
-      <CardContent className="relative px-4 sm:px-6 pb-4 sm:pb-6">
-        <div className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">
-          {formatCurrency(Math.abs(value))}
-        </div>
+        <h3 className={`text-sm font-semibold mb-2 ${textColor === 'white' ? 'text-white/90' : 'text-gray-600'}`}>
+          {title}
+        </h3>
+        <p className={`text-3xl font-bold mb-2 ${textColor === 'white' ? 'text-white' : 'text-gray-900'}`}>
+          {typeof value === 'number' ? formatCurrency(value) : value}
+        </p>
         {subtitle && (
-          <p className="text-xs sm:text-sm text-white/90 leading-tight">{subtitle}</p>
-        )}
-        {isPositive !== undefined && (
-          <p className={`text-xs sm:text-sm flex items-center mt-2 ${isPositive ? 'text-emerald-200' : 'text-red-200'}`}>
-            {isPositive ? <TrendingUp className="h-4 w-4 mr-1" /> : <TrendingDown className="h-4 w-4 mr-1" />}
-            {isPositive ? 'Positive' : 'Negative'} flow
+          <p className={`text-sm ${textColor === 'white' ? 'text-white/80' : 'text-gray-500'}`}>
+            {subtitle}
           </p>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 
   return (
-    <div className="space-y-6 sm:space-y-8 lg:space-y-10 p-2 sm:p-4">
-      {/* Enhanced Header Section */}
-      <div className="bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 rounded-2xl sm:rounded-3xl p-6 sm:p-8 lg:p-10 shadow-2xl text-white">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-          <div className="flex-1">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white/20 rounded-xl flex items-center justify-center">
-                <BarChart3 className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 p-6">
+      {/* Modern Header with Navigation */}
+      <div className="mb-8">
+        <div className="bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 rounded-3xl p-8 shadow-2xl text-white relative overflow-hidden">
+          <div className="absolute inset-0 bg-grid-pattern opacity-10"></div>
+          <div className="relative z-10">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+              <div className="flex items-center gap-6">
+                <div className="w-20 h-20 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                  <BarChart3 className="h-10 w-10 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-white to-blue-100 bg-clip-text">
+                    Financial Command Center
+                  </h1>
+                  <p className="text-blue-100 text-lg">Advanced Business Intelligence Dashboard</p>
+                  <div className="flex items-center gap-4 mt-3">
+                    <Badge className="bg-emerald-500/20 text-emerald-100 border-emerald-300/30">
+                      <Clock className="h-4 w-4 mr-1" />
+                      Real-time Data
+                    </Badge>
+                    <Badge className="bg-amber-500/20 text-amber-100 border-amber-300/30">
+                      <Users className="h-4 w-4 mr-1" />
+                      {loans.length} Active Loans
+                    </Badge>
+                  </div>
+                </div>
               </div>
-              <div>
-                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2">Financial Dashboard</h1>
-                <p className="text-blue-100 text-sm sm:text-base lg:text-lg">Real-time business insights at your fingertips</p>
+              <div className="flex flex-col gap-4">
+                <div className="text-right">
+                  <p className="text-blue-200 text-sm">Available Cash</p>
+                  <p className="text-3xl font-bold">{formatCurrency(metrics.cashInHand)}</p>
+                </div>
+                <Button 
+                  onClick={downloadBalanceSheet}
+                  className="bg-white text-purple-600 hover:bg-blue-50 px-6 py-3 rounded-2xl shadow-lg font-semibold transition-all duration-300 hover:scale-105"
+                >
+                  <Download className="mr-2 h-5 w-5" />
+                  Balance Sheet
+                </Button>
               </div>
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="text-center sm:text-right">
-              <p className="text-blue-200 text-sm">Cash in Hand</p>
-              <p className="text-2xl sm:text-3xl font-bold">{formatCurrency(metrics.cashInHand)}</p>
-            </div>
-            <Button 
-              onClick={downloadBalanceSheet}
-              className="bg-white text-blue-600 hover:bg-blue-50 px-6 py-3 rounded-xl shadow-lg font-semibold"
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="flex gap-2 mt-6 bg-white/60 backdrop-blur-sm p-2 rounded-2xl shadow-lg">
+          {[
+            { id: 'overview', label: 'Overview', icon: BarChart3 },
+            { id: 'analytics', label: 'Analytics', icon: TrendingUp },
+            { id: 'customers', label: 'Customer Insights', icon: Users },
+            { id: 'alerts', label: 'Alerts', icon: AlertTriangle },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveSection(tab.id)}
+              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
+                activeSection === tab.id
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg'
+                  : 'text-gray-600 hover:bg-white/50'
+              }`}
             >
-              <Download className="mr-2 h-5 w-5" />
-              Balance Sheet
-            </Button>
-          </div>
+              <tab.icon className="h-4 w-4" />
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Primary Metrics Grid - Enhanced */}
-      <div className="grid gap-4 sm:gap-6 lg:gap-8 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-        <MetricCard
-          title="Cash in Hand"
-          value={metrics.cashInHand}
-          icon={DollarSign}
-          bgGradient="bg-gradient-to-br from-emerald-500 to-teal-500"
-          isPositive={metrics.cashInHand > 0}
-          subtitle="Available balance"
-        />
-        <MetricCard
-          title="Total Invested"
-          value={metrics.totalInvestedAmount}
-          icon={Wallet}
-          bgGradient="bg-gradient-to-br from-blue-500 to-indigo-500"
-          subtitle="Amount given to customers"
-        />
-        <MetricCard
-          title="Total Collections"
-          value={metrics.totalCollections}
-          icon={TrendingUp}
-          bgGradient="bg-gradient-to-br from-purple-500 to-pink-500"
-          isPositive={true}
-          subtitle="Payments received"
-        />
-      </div>
+      {/* Main Content */}
+      {activeSection === 'overview' && (
+        <div className="space-y-8">
+          {/* Primary Metrics */}
+          <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
+            <MetricCard
+              title="Cash in Hand"
+              value={metrics.cashInHand}
+              icon={DollarSign}
+              gradient="bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500"
+              subtitle="Available liquidity"
+            />
+            <MetricCard
+              title="Total Invested"
+              value={metrics.totalInvestedAmount}
+              icon={Wallet}
+              gradient="bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-500"
+              subtitle="Capital deployed"
+            />
+            <MetricCard
+              title="Collections"
+              value={metrics.totalCollections}
+              icon={TrendingUp}
+              gradient="bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500"
+              subtitle="Total received"
+            />
+            <MetricCard
+              title="Outstanding"
+              value={metrics.outstandingAmount}
+              icon={AlertCircle}
+              gradient="bg-gradient-to-br from-orange-500 via-red-500 to-pink-500"
+              subtitle="Pending collections"
+            />
+          </div>
 
-      {/* Secondary Metrics Grid */}
-      <div className="grid gap-4 sm:gap-6 lg:gap-8 grid-cols-1 sm:grid-cols-2">
-        <MetricCard
-          title="Outstanding Amount"
-          value={metrics.outstandingAmount}
-          icon={AlertCircle}
-          bgGradient="bg-gradient-to-br from-red-500 to-orange-500"
-          isPositive={false}
-          subtitle="Pending collections"
-        />
-        <MetricCard
-          title="Expected Profit"
-          value={metrics.expectedProfit}
-          icon={Target}
-          bgGradient="bg-gradient-to-br from-cyan-500 to-blue-500"
-          subtitle="Deduction + Interest"
-        />
-      </div>
+          {/* Chart Section */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
+              <CardHeader className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-6">
+                <CardTitle className="text-xl font-bold flex items-center">
+                  <BarChart3 className="mr-3 h-6 w-6" />
+                  Monthly Performance
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <ChartContainer
+                  config={{
+                    amount: { label: "Loan Amount", color: "#3b82f6" },
+                    collections: { label: "Collections", color: "#10b981" }
+                  }}
+                  className="h-[300px]"
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={monthlyData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Bar dataKey="amount" fill="#3b82f6" name="Loans" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="collections" fill="#10b981" name="Collections" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
+              </CardContent>
+            </Card>
 
-      {/* Enhanced Analytics Cards */}
-      <div className="grid gap-6 sm:gap-8 grid-cols-1 lg:grid-cols-2">
-        <Card className="bg-gradient-to-br from-white to-blue-50 shadow-xl border border-blue-200 rounded-2xl overflow-hidden">
-          <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
-            <CardTitle className="text-xl font-bold flex items-center">
-              <BarChart3 className="mr-3 h-6 w-6" />
-              Portfolio Overview
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-6">
-            <div className="space-y-6">
-              <div className="flex justify-between items-center p-4 bg-gradient-to-r from-emerald-100 to-teal-100 rounded-xl border border-emerald-200">
-                <span className="font-semibold text-slate-700">Active Loans</span>
-                <span className="text-3xl font-bold text-emerald-600">
-                  {loans.filter(loan => loan.status === 'Ongoing').length}
-                </span>
-              </div>
-              <div className="flex justify-between items-center p-4 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-xl border border-blue-200">
-                <span className="font-semibold text-slate-700">Completed Loans</span>
-                <span className="text-3xl font-bold text-blue-600">
-                  {loans.filter(loan => loan.status === 'Completed').length}
-                </span>
-              </div>
-              <div className="flex justify-between items-center p-4 bg-gradient-to-r from-purple-100 to-pink-100 rounded-xl border border-purple-200">
-                <span className="font-semibold text-slate-700">Total Collections</span>
-                <span className="text-3xl font-bold text-purple-600">{collections.length}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
+              <CardHeader className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-6">
+                <CardTitle className="text-xl font-bold flex items-center">
+                  <PieChart className="mr-3 h-6 w-6" />
+                  Customer Status Matrix
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <div className="space-y-4">
+                  {customerStatusData.map((item, index) => (
+                    <div key={index} className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-slate-50 to-white shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <div 
+                          className="w-4 h-4 rounded-full" 
+                          style={{ backgroundColor: item.color }}
+                        ></div>
+                        <span className="font-semibold text-slate-700">{item.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl font-bold" style={{ color: item.color }}>
+                          {item.value}
+                        </span>
+                        <div className="w-20 h-2 bg-slate-200 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full rounded-full transition-all duration-1000"
+                            style={{ 
+                              backgroundColor: item.color,
+                              width: `${(item.value / Math.max(...customerStatusData.map(d => d.value))) * 100}%`
+                            }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
 
-        <Card className="bg-gradient-to-br from-white to-purple-50 shadow-xl border border-purple-200 rounded-2xl overflow-hidden">
-          <CardHeader className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-6">
-            <CardTitle className="text-xl font-bold flex items-center">
-              <PieChart className="mr-3 h-6 w-6" />
-              Performance Metrics
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-6">
-            <div className="space-y-6">
-              <div className="p-4 bg-gradient-to-r from-emerald-100 to-teal-100 rounded-xl border border-emerald-200">
-                <div className="flex justify-between items-center mb-3">
-                  <span className="font-semibold text-slate-700">Collection Rate</span>
-                  <span className="text-2xl font-bold text-emerald-600">
-                    {metrics.totalInvestedAmount > 0 
-                      ? `${((metrics.totalCollections / metrics.totalInvestedAmount) * 100).toFixed(1)}%`
-                      : '0%'
-                    }
-                  </span>
+      {activeSection === 'customers' && (
+        <div className="space-y-8">
+          {/* Near to Closing Customers */}
+          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-6">
+              <CardTitle className="text-xl font-bold flex items-center">
+                <Clock className="mr-3 h-6 w-6" />
+                Near to Closing (10 Days Buffer)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              {metrics.nearToClosingCustomers.length > 0 ? (
+                <div className="grid gap-4">
+                  {metrics.nearToClosingCustomers.map((loan) => {
+                    const remainingAmount = Math.max(0, loan.loanAmount - loan.collected);
+                    const remainingDays = Math.ceil(remainingAmount / loan.dailyPay);
+                    return (
+                      <div key={loan.id} className="flex items-center justify-between p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl border border-amber-200">
+                        <div>
+                          <h4 className="font-semibold text-slate-800">{loan.customerName}</h4>
+                          <p className="text-sm text-slate-600">Loan ID: {loan.id}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-amber-600">{remainingDays} days left</p>
+                          <p className="text-sm text-slate-600">{formatCurrency(remainingAmount)} remaining</p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="w-full bg-emerald-200 rounded-full h-3">
-                  <div 
-                    className="bg-emerald-500 h-3 rounded-full transition-all duration-1000" 
-                    style={{ width: `${Math.min(100, (metrics.totalCollections / metrics.totalInvestedAmount) * 100)}%` }}
-                  ></div>
+              ) : (
+                <p className="text-center text-slate-500 py-8">No customers nearing closure</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Payment Delay Customers */}
+          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-red-500 to-pink-500 text-white p-6">
+              <CardTitle className="text-xl font-bold flex items-center">
+                <AlertTriangle className="mr-3 h-6 w-6" />
+                Payment Delayed (3+ Days)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              {metrics.paymentDelayCustomers.length > 0 ? (
+                <div className="grid gap-4">
+                  {metrics.paymentDelayCustomers.map((loan) => {
+                    const lastCollection = collections
+                      .filter(c => c.loanId === loan.id)
+                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+                    
+                    const daysSincePayment = lastCollection 
+                      ? Math.floor((new Date().getTime() - new Date(lastCollection.date).getTime()) / (1000 * 60 * 60 * 24))
+                      : Math.floor((new Date().getTime() - new Date(loan.date).getTime()) / (1000 * 60 * 60 * 24));
+                    
+                    return (
+                      <div key={loan.id} className="flex items-center justify-between p-4 bg-gradient-to-r from-red-50 to-pink-50 rounded-2xl border border-red-200">
+                        <div>
+                          <h4 className="font-semibold text-slate-800">{loan.customerName}</h4>
+                          <p className="text-sm text-slate-600">Loan ID: {loan.id}</p>
+                          <p className="text-xs text-red-600">
+                            Last payment: {lastCollection ? lastCollection.date : 'No payments yet'}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-red-600">{daysSincePayment} days overdue</p>
+                          <p className="text-sm text-slate-600">{formatCurrency(loan.balance)} pending</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-center text-slate-500 py-8">All payments are up to date</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {activeSection === 'analytics' && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6">
+              <CardTitle className="text-xl font-bold">Performance Trends</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <ChartContainer
+                config={{
+                  collections: { label: "Collections", color: "#10b981" }
+                }}
+                className="h-[300px]"
+              >
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={monthlyData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Line 
+                      type="monotone" 
+                      dataKey="collections" 
+                      stroke="#10b981" 
+                      strokeWidth={3}
+                      dot={{ fill: '#10b981', strokeWidth: 2, r: 6 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartContainer>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-6">
+              <CardTitle className="text-xl font-bold">Key Ratios</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-6">
+                <div className="p-4 bg-gradient-to-r from-emerald-100 to-teal-100 rounded-2xl">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="font-semibold text-slate-700">Collection Rate</span>
+                    <span className="text-2xl font-bold text-emerald-600">
+                      {metrics.totalInvestedAmount > 0 
+                        ? `${((metrics.totalCollections / metrics.totalInvestedAmount) * 100).toFixed(1)}%`
+                        : '0%'
+                      }
+                    </span>
+                  </div>
+                  <div className="w-full bg-emerald-200 rounded-full h-3">
+                    <div 
+                      className="bg-emerald-500 h-3 rounded-full transition-all duration-1000" 
+                      style={{ width: `${Math.min(100, (metrics.totalCollections / metrics.totalInvestedAmount) * 100)}%` }}
+                    ></div>
+                  </div>
+                </div>
+                
+                <div className="p-4 bg-gradient-to-r from-purple-100 to-indigo-100 rounded-2xl">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="font-semibold text-slate-700">Profit Margin</span>
+                    <span className="text-2xl font-bold text-purple-600">
+                      {metrics.totalInvestedAmount > 0 
+                        ? `${((metrics.expectedProfit / metrics.totalInvestedAmount) * 100).toFixed(1)}%`
+                        : '0%'
+                      }
+                    </span>
+                  </div>
+                  <div className="w-full bg-purple-200 rounded-full h-3">
+                    <div 
+                      className="bg-purple-500 h-3 rounded-full transition-all duration-1000" 
+                      style={{ width: `${Math.min(100, (metrics.expectedProfit / metrics.totalInvestedAmount) * 100)}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-gradient-to-r from-blue-100 to-cyan-100 rounded-2xl">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="font-semibold text-slate-700">Outstanding Ratio</span>
+                    <span className="text-2xl font-bold text-blue-600">
+                      {metrics.totalInvestedAmount > 0 
+                        ? `${((metrics.outstandingAmount / metrics.totalInvestedAmount) * 100).toFixed(1)}%`
+                        : '0%'
+                      }
+                    </span>
+                  </div>
+                  <div className="w-full bg-blue-200 rounded-full h-3">
+                    <div 
+                      className="bg-blue-500 h-3 rounded-full transition-all duration-1000" 
+                      style={{ width: `${Math.min(100, (metrics.outstandingAmount / metrics.totalInvestedAmount) * 100)}%` }}
+                    ></div>
+                  </div>
                 </div>
               </div>
-              
-              <div className="p-4 bg-gradient-to-r from-purple-100 to-indigo-100 rounded-xl border border-purple-200">
-                <div className="flex justify-between items-center mb-3">
-                  <span className="font-semibold text-slate-700">Profit Margin</span>
-                  <span className="text-2xl font-bold text-purple-600">
-                    {metrics.totalInvestedAmount > 0 
-                      ? `${((metrics.expectedProfit / metrics.totalInvestedAmount) * 100).toFixed(1)}%`
-                      : '0%'
-                    }
-                  </span>
-                </div>
-                <div className="w-full bg-purple-200 rounded-full h-3">
-                  <div 
-                    className="bg-purple-500 h-3 rounded-full transition-all duration-1000" 
-                    style={{ width: `${Math.min(100, (metrics.expectedProfit / metrics.totalInvestedAmount) * 100)}%` }}
-                  ></div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {activeSection === 'alerts' && (
+        <div className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            <MetricCard
+              title="Near Closing"
+              value={metrics.nearToClosingCustomers.length}
+              icon={Clock}
+              gradient="bg-gradient-to-br from-amber-500 to-orange-500"
+              subtitle="Customers with ≤10 days remaining"
+            />
+            <MetricCard
+              title="Payment Delayed"
+              value={metrics.paymentDelayCustomers.length}
+              icon={AlertTriangle}
+              gradient="bg-gradient-to-br from-red-500 to-pink-500"
+              subtitle="Customers with 3+ days delay"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

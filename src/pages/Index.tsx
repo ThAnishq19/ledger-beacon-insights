@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -112,6 +111,7 @@ const Index = () => {
                 toggleLoanStatus={toggleLoanStatus}
                 getLoanCashFlow={getLoanCashFlow}
                 addBulkCollection={addBulkCollection}
+                addCollection={addCollection}
               />
             </TabsContent>
 

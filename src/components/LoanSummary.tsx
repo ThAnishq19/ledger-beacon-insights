@@ -8,6 +8,7 @@ import { Loan, Collection } from "@/hooks/useFinanceData";
 import { Plus, Trash2, Power, Eye, Zap, Wallet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import LoanCashFlowModal from "./LoanCashFlowModal";
+import EnhancedBulkCollection from "./EnhancedBulkCollection";
 
 interface LoanSummaryProps {
   loans: Loan[];
@@ -18,6 +19,7 @@ interface LoanSummaryProps {
   toggleLoanStatus: (loanId: string) => void;
   getLoanCashFlow: (loanId: string) => any;
   addBulkCollection: (loanId: string, collectedBy: string, remarks: string) => void;
+  addCollection: (collection: any) => void;
 }
 
 const LoanSummary: React.FC<LoanSummaryProps> = ({ 
@@ -28,18 +30,14 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
   deleteLoan, 
   toggleLoanStatus, 
   getLoanCashFlow,
-  addBulkCollection
+  addBulkCollection,
+  addCollection
 }) => {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [showCashFlow, setShowCashFlow] = useState(false);
-  const [bulkCollectionData, setBulkCollectionData] = useState({
-    loanId: '',
-    collectedBy: '',
-    remarks: '',
-  });
-  const [showBulkForm, setShowBulkForm] = useState(false);
+  const [showEnhancedBulkCollection, setShowEnhancedBulkCollection] = useState(false);
   const [formData, setFormData] = useState({
     id: '',
     customerName: '',
@@ -57,29 +55,6 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(amount || 0);
-  };
-
-  const handleBulkCollection = (loanId: string) => {
-    setBulkCollectionData({ loanId, collectedBy: '', remarks: '' });
-    setShowBulkForm(true);
-  };
-
-  const submitBulkCollection = () => {
-    if (!bulkCollectionData.loanId) return;
-    
-    addBulkCollection(
-      bulkCollectionData.loanId, 
-      bulkCollectionData.collectedBy, 
-      bulkCollectionData.remarks || '100 days bulk collection'
-    );
-    
-    setShowBulkForm(false);
-    setBulkCollectionData({ loanId: '', collectedBy: '', remarks: '' });
-    
-    toast({
-      title: "Success",
-      description: "Bulk collection completed successfully",
-    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -156,6 +131,18 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
 
   return (
     <div className="space-y-6 sm:space-y-8">
+      {/* Enhanced Bulk Collection Modal */}
+      {showEnhancedBulkCollection && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <EnhancedBulkCollection
+            loans={loans}
+            onClose={() => setShowEnhancedBulkCollection(false)}
+            addBulkCollection={addBulkCollection}
+            addCollection={addCollection}
+          />
+        </div>
+      )}
+
       {/* Enhanced Header */}
       <div className="bg-gradient-to-r from-purple-600 via-blue-600 to-indigo-600 rounded-2xl p-6 sm:p-8 shadow-2xl text-white">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -165,11 +152,11 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
           </div>
           <div className="flex flex-col sm:flex-row gap-3">
             <Button 
-              onClick={() => setShowBulkForm(true)}
+              onClick={() => setShowEnhancedBulkCollection(true)}
               className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-lg font-semibold"
             >
               <Zap className="mr-2 h-5 w-5" />
-              Bulk Collection
+              Enhanced Collection
             </Button>
             <Button 
               onClick={() => setShowForm(!showForm)}
@@ -181,68 +168,6 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Bulk Collection Modal */}
-      {showBulkForm && (
-        <Card className="bg-white shadow-2xl border-0 rounded-2xl overflow-hidden">
-          <CardHeader className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
-            <CardTitle className="text-xl">100 Days Bulk Collection</CardTitle>
-          </CardHeader>
-          <CardContent className="p-6">
-            <div className="space-y-4">
-              <div>
-                <Label>Select Loan</Label>
-                <select 
-                  className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-emerald-500"
-                  value={bulkCollectionData.loanId}
-                  onChange={(e) => setBulkCollectionData(prev => ({ ...prev, loanId: e.target.value }))}
-                >
-                  <option value="">Select a loan</option>
-                  {loans.filter(loan => loan.balance > 0).map(loan => (
-                    <option key={loan.id} value={loan.id}>
-                      {loan.id} - {loan.customerName} (Balance: {formatCurrency(loan.balance)})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <Label>Collected By</Label>
-                <Input
-                  value={bulkCollectionData.collectedBy}
-                  onChange={(e) => setBulkCollectionData(prev => ({ ...prev, collectedBy: e.target.value }))}
-                  placeholder="Enter collector name"
-                  className="rounded-xl"
-                />
-              </div>
-              <div>
-                <Label>Remarks</Label>
-                <Input
-                  value={bulkCollectionData.remarks}
-                  onChange={(e) => setBulkCollectionData(prev => ({ ...prev, remarks: e.target.value }))}
-                  placeholder="Additional notes"
-                  className="rounded-xl"
-                />
-              </div>
-              <div className="flex gap-3 pt-4">
-                <Button 
-                  onClick={submitBulkCollection}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-xl"
-                  disabled={!bulkCollectionData.loanId}
-                >
-                  Complete Collection
-                </Button>
-                <Button 
-                  onClick={() => setShowBulkForm(false)}
-                  variant="outline"
-                  className="px-6 py-2 rounded-xl"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {showForm && (
         <Card className="bg-white shadow-lg">
@@ -338,7 +263,6 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
         </Card>
       )}
 
-      {/* Enhanced Loans Table */}
       <Card className="bg-white shadow-2xl border-0 rounded-2xl overflow-hidden">
         <CardHeader className="bg-gradient-to-r from-slate-800 to-slate-700 text-white p-6">
           <CardTitle className="text-xl">All Loans</CardTitle>
@@ -368,15 +292,6 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
                   <tr key={loan.id} className={`${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-blue-50 transition-colors ${loan.isDisabled ? 'opacity-60' : ''}`}>
                     <td className="p-4">
                       <div className="flex gap-1">
-                        <Button
-                          size="sm"
-                          onClick={() => handleBulkCollection(loan.id)}
-                          className="h-8 w-8 p-0 bg-emerald-500 hover:bg-emerald-600 text-white"
-                          title="100 Days Collection"
-                          disabled={loan.balance <= 0}
-                        >
-                          <Zap className="h-4 w-4" />
-                        </Button>
                         <Button
                           size="sm"
                           variant="outline"
