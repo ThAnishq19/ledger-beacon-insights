@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loan, Collection, Fund } from "@/hooks/useFinanceData";
@@ -6,7 +5,7 @@ import { TrendingUp, TrendingDown, DollarSign, Target, Wallet, AlertCircle, PieC
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LineChart, Line } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LineChart, Line, PieChart as RechartsPieChart, Cell } from "recharts";
 
 interface DashboardProps {
   loans: Loan[];
@@ -89,6 +88,9 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
       return daysSinceLastPayment >= 3;
     });
 
+    // 100-day loan completion customers
+    const hundredDayCustomers = loans.filter(loan => loan.days === 100);
+
     return {
       cashInHand,
       totalInvestedAmount,
@@ -97,6 +99,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
       expectedProfit,
       nearToClosingCustomers,
       paymentDelayCustomers,
+      hundredDayCustomers,
     };
   };
 
@@ -111,34 +114,100 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
     }).format(amount || 0);
   };
 
-  // Chart data preparation
-  const monthlyData = loans.reduce((acc, loan) => {
-    const month = new Date(loan.date).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
-    const existing = acc.find(item => item.month === month);
-    if (existing) {
-      existing.loans += 1;
-      existing.amount += loan.netGiven;
-    } else {
-      acc.push({ month, loans: 1, amount: loan.netGiven, collections: 0 });
-    }
-    return acc;
-  }, [] as Array<{ month: string; loans: number; amount: number; collections: number }>);
+  // Enhanced Chart data preparation with better customer counts
+  const monthlyData = () => {
+    const monthMap = new Map();
+    
+    // Process loans by month
+    loans.forEach(loan => {
+      const monthKey = new Date(loan.date).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+      if (!monthMap.has(monthKey)) {
+        monthMap.set(monthKey, {
+          month: monthKey,
+          loans: 0,
+          amount: 0,
+          collections: 0,
+          customers: 0,
+          hundredDayCustomers: 0
+        });
+      }
+      const monthData = monthMap.get(monthKey);
+      monthData.loans += 1;
+      monthData.amount += loan.netGiven;
+      monthData.customers += 1;
+      if (loan.days === 100) {
+        monthData.hundredDayCustomers += 1;
+      }
+    });
 
-  // Add collections data
-  collections.forEach(collection => {
-    const month = new Date(collection.date).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
-    const existing = monthlyData.find(item => item.month === month);
-    if (existing) {
-      existing.collections += collection.amountPaid;
-    }
-  });
+    // Process collections by month
+    collections.forEach(collection => {
+      const monthKey = new Date(collection.date).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+      if (monthMap.has(monthKey)) {
+        monthMap.get(monthKey).collections += collection.amountPaid;
+      }
+    });
 
+    return Array.from(monthMap.values()).sort((a, b) => {
+      const dateA = new Date(a.month + ' 1');
+      const dateB = new Date(b.month + ' 1');
+      return dateA.getTime() - dateB.getTime();
+    });
+  };
+
+  const chartData = monthlyData();
+
+  // Enhanced customer status data with proper counts
   const customerStatusData = [
-    { name: 'Active', value: loans.filter(l => l.status === 'Ongoing').length, color: '#10b981' },
-    { name: 'Completed', value: loans.filter(l => l.status === 'Completed').length, color: '#3b82f6' },
-    { name: 'Near Closing', value: metrics.nearToClosingCustomers.length, color: '#f59e0b' },
-    { name: 'Payment Delayed', value: metrics.paymentDelayCustomers.length, color: '#ef4444' },
+    { 
+      name: 'Active Loans', 
+      value: loans.filter(l => l.status === 'Ongoing' && !l.isDisabled).length, 
+      color: '#10b981',
+      description: 'Currently ongoing loans'
+    },
+    { 
+      name: 'Completed', 
+      value: loans.filter(l => l.status === 'Completed').length, 
+      color: '#3b82f6',
+      description: 'Successfully completed loans'
+    },
+    { 
+      name: '100-Day Plans', 
+      value: metrics.hundredDayCustomers.length, 
+      color: '#8b5cf6',
+      description: '100-day loan customers'
+    },
+    { 
+      name: 'Near Closing', 
+      value: metrics.nearToClosingCustomers.length, 
+      color: '#f59e0b',
+      description: 'Customers with ≤10 days remaining'
+    },
+    { 
+      name: 'Payment Delayed', 
+      value: metrics.paymentDelayCustomers.length, 
+      color: '#ef4444',
+      description: 'Customers with 3+ days delay'
+    },
   ];
+
+  // Day-wise loan distribution for 100-day analysis
+  const dayWiseData = () => {
+    const dayMap = new Map();
+    loans.filter(loan => !loan.isDisabled).forEach(loan => {
+      const days = loan.days || 100;
+      if (!dayMap.has(days)) {
+        dayMap.set(days, { days, customers: 0, totalAmount: 0 });
+      }
+      const dayData = dayMap.get(days);
+      dayData.customers += 1;
+      dayData.totalAmount += loan.netGiven;
+    });
+    
+    return Array.from(dayMap.values()).sort((a, b) => a.days - b.days);
+  };
+
+  const dayWiseChartData = dayWiseData();
 
   const downloadBalanceSheet = () => {
     const balanceSheetData = {
@@ -343,7 +412,11 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
                     </Badge>
                     <Badge className="bg-amber-500/20 text-amber-100 border-amber-300/30">
                       <Users className="h-4 w-4 mr-1" />
-                      {loans.length} Active Loans
+                      {loans.length} Total Loans
+                    </Badge>
+                    <Badge className="bg-purple-500/20 text-purple-100 border-purple-300/30">
+                      <Calendar className="h-4 w-4 mr-1" />
+                      {metrics.hundredDayCustomers.length} x 100 Days
                     </Badge>
                   </div>
                 </div>
@@ -424,31 +497,32 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
             />
           </div>
 
-          {/* Chart Section */}
+          {/* Enhanced Chart Section */}
           <div className="grid gap-6 lg:grid-cols-2">
             <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
               <CardHeader className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-6">
                 <CardTitle className="text-xl font-bold flex items-center">
                   <BarChart3 className="mr-3 h-6 w-6" />
-                  Monthly Performance
+                  Monthly Customer & Performance Analysis
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-6">
                 <ChartContainer
                   config={{
-                    amount: { label: "Loan Amount", color: "#3b82f6" },
-                    collections: { label: "Collections", color: "#10b981" }
+                    customers: { label: "Customers", color: "#3b82f6" },
+                    collections: { label: "Collections", color: "#10b981" },
+                    hundredDayCustomers: { label: "100-Day Customers", color: "#8b5cf6" }
                   }}
                   className="h-[300px]"
                 >
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyData}>
+                    <BarChart data={chartData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="month" />
                       <YAxis />
                       <ChartTooltip content={<ChartTooltipContent />} />
-                      <Bar dataKey="amount" fill="#3b82f6" name="Loans" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="collections" fill="#10b981" name="Collections" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="customers" fill="#3b82f6" name="Total Customers" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="hundredDayCustomers" fill="#8b5cf6" name="100-Day Customers" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </ChartContainer>
@@ -459,7 +533,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
               <CardHeader className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-6">
                 <CardTitle className="text-xl font-bold flex items-center">
                   <PieChart className="mr-3 h-6 w-6" />
-                  Customer Status Matrix
+                  Customer Status Distribution
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-6">
@@ -471,7 +545,10 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
                           className="w-4 h-4 rounded-full" 
                           style={{ backgroundColor: item.color }}
                         ></div>
-                        <span className="font-semibold text-slate-700">{item.name}</span>
+                        <div>
+                          <span className="font-semibold text-slate-700">{item.name}</span>
+                          <p className="text-xs text-slate-500">{item.description}</p>
+                        </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-2xl font-bold" style={{ color: item.color }}>
@@ -493,6 +570,35 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
               </CardContent>
             </Card>
           </div>
+
+          {/* Day-wise Analysis Chart */}
+          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6">
+              <CardTitle className="text-xl font-bold flex items-center">
+                <Calendar className="mr-3 h-6 w-6" />
+                Loan Duration Analysis (Days vs Customers)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <ChartContainer
+                config={{
+                  customers: { label: "Number of Customers", color: "#8b5cf6" },
+                  totalAmount: { label: "Total Amount", color: "#3b82f6" }
+                }}
+                className="h-[300px]"
+              >
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dayWiseChartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="days" label={{ value: 'Loan Duration (Days)', position: 'insideBottom', offset: -5 }} />
+                    <YAxis />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="customers" fill="#8b5cf6" name="Customers" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartContainer>
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -517,6 +623,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
                         <div>
                           <h4 className="font-semibold text-slate-800">{loan.customerName}</h4>
                           <p className="text-sm text-slate-600">Loan ID: {loan.id}</p>
+                          <p className="text-xs text-amber-600">Total Duration: {loan.days} days</p>
                         </div>
                         <div className="text-right">
                           <p className="font-bold text-amber-600">{remainingDays} days left</p>
@@ -560,6 +667,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
                           <p className="text-xs text-red-600">
                             Last payment: {lastCollection ? lastCollection.date : 'No payments yet'}
                           </p>
+                          <p className="text-xs text-slate-500">Total Duration: {loan.days} days</p>
                         </div>
                         <div className="text-right">
                           <p className="font-bold text-red-600">{daysSincePayment} days overdue</p>
@@ -591,7 +699,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
                 className="h-[300px]"
               >
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={monthlyData}>
+                  <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="month" />
                     <YAxis />
