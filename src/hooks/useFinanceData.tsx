@@ -89,16 +89,13 @@ export const useFinanceData = () => {
   }, [funds]);
 
   const calculateLoanMetrics = (loan: Omit<Loan, 'totalToReceive' | 'collected' | 'balance' | 'status' | 'profit'>) => {
-    // Total to receive is the full loan amount (what customer needs to pay back)
-    const totalToReceive = loan.loanAmount;
-    
     // Calculate collected amount from collections
     const collected = collections
       .filter(c => c.loanId === loan.id)
       .reduce((sum, c) => sum + (c.amountPaid || 0), 0);
     
-    // Balance is what's still owed
-    const balance = Math.max(0, totalToReceive - collected);
+    // Balance is what's still owed (loan amount - collected)
+    const balance = Math.max(0, loan.loanAmount - collected);
     
     // Status based on balance and disabled state
     let status: 'Ongoing' | 'Completed' | 'Disabled';
@@ -108,16 +105,17 @@ export const useFinanceData = () => {
       status = balance <= 0 ? 'Completed' : 'Ongoing';
     }
     
-    // Profit calculation: deduction (upfront) + any excess collected
-    const profit = (loan.deduction || 0) + Math.max(0, collected - (loan.netGiven || 0));
+    // New profit calculation: deduction + (customer total payment - net given)
+    // Customer should pay full loan amount, so extra profit = loanAmount - netGiven - deduction
+    const expectedTotalProfit = loan.deduction + (loan.loanAmount - loan.netGiven);
     
     return {
       ...loan,
-      totalToReceive,
+      totalToReceive: loan.loanAmount, // Customer pays back full loan amount
       collected,
       balance,
       status,
-      profit,
+      profit: expectedTotalProfit,
     };
   };
 
@@ -164,25 +162,42 @@ export const useFinanceData = () => {
     }));
   };
 
+  const addBulkCollection = (loanId: string, collectedBy: string, remarks: string) => {
+    const loan = loans.find(l => l.id === loanId);
+    if (!loan) return;
+
+    const remainingAmount = loan.balance;
+    if (remainingAmount <= 0) return;
+
+    const newCollection: Collection = {
+      id: `bulk-${Date.now()}`,
+      date: new Date().toISOString().split('T')[0],
+      loanId: loanId,
+      customer: loan.customerName,
+      amountPaid: remainingAmount,
+      collectedBy: collectedBy || 'System',
+      remarks: remarks || '100 days bulk collection',
+    };
+
+    addCollection(newCollection);
+  };
+
   const addFund = (fundData: Omit<Fund, 'balance'>) => {
     try {
       console.log('Adding fund:', fundData);
       
-      // Create new fund entry
       const newFund = {
         ...fundData,
         id: fundData.id || `fund-${Date.now()}`,
         inflow: Number(fundData.inflow) || 0,
         outflow: Number(fundData.outflow) || 0,
-        balance: 0 // Will be calculated below
+        balance: 0
       };
 
-      // Get all funds including the new one and sort by date
       const allFunds = [...funds, newFund].sort((a, b) => 
         new Date(a.date).getTime() - new Date(b.date).getTime()
       );
       
-      // Recalculate all balances
       let runningBalance = 0;
       const updatedFunds = allFunds.map(fund => {
         runningBalance += fund.inflow - fund.outflow;
@@ -237,6 +252,7 @@ export const useFinanceData = () => {
     funds,
     addLoan,
     addCollection,
+    addBulkCollection,
     addFund,
     updateLoan,
     deleteLoan,

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Loan, Collection } from "@/hooks/useFinanceData";
-import { Plus, Trash2, Power, Eye } from "lucide-react";
+import { Plus, Trash2, Power, Eye, Zap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import LoanCashFlowModal from "./LoanCashFlowModal";
 
@@ -18,6 +17,7 @@ interface LoanSummaryProps {
   deleteLoan: (loanId: string) => void;
   toggleLoanStatus: (loanId: string) => void;
   getLoanCashFlow: (loanId: string) => any;
+  addBulkCollection: (loanId: string, collectedBy: string, remarks: string) => void;
 }
 
 const LoanSummary: React.FC<LoanSummaryProps> = ({ 
@@ -27,12 +27,19 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
   onUpdateLoan, 
   deleteLoan, 
   toggleLoanStatus, 
-  getLoanCashFlow 
+  getLoanCashFlow,
+  addBulkCollection
 }) => {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [showCashFlow, setShowCashFlow] = useState(false);
+  const [bulkCollectionData, setBulkCollectionData] = useState({
+    loanId: '',
+    collectedBy: '',
+    remarks: '',
+  });
+  const [showBulkForm, setShowBulkForm] = useState(false);
   const [formData, setFormData] = useState({
     id: '',
     customerName: '',
@@ -50,6 +57,29 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(amount || 0);
+  };
+
+  const handleBulkCollection = (loanId: string) => {
+    setBulkCollectionData({ loanId, collectedBy: '', remarks: '' });
+    setShowBulkForm(true);
+  };
+
+  const submitBulkCollection = () => {
+    if (!bulkCollectionData.loanId) return;
+    
+    addBulkCollection(
+      bulkCollectionData.loanId, 
+      bulkCollectionData.collectedBy, 
+      bulkCollectionData.remarks || '100 days bulk collection'
+    );
+    
+    setShowBulkForm(false);
+    setBulkCollectionData({ loanId: '', collectedBy: '', remarks: '' });
+    
+    toast({
+      title: "Success",
+      description: "Bulk collection completed successfully",
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -125,20 +155,94 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Loan Summary</h2>
-          <p className="text-slate-600">Manage and track all loan records</p>
+    <div className="space-y-6 sm:space-y-8">
+      {/* Enhanced Header */}
+      <div className="bg-gradient-to-r from-purple-600 via-blue-600 to-indigo-600 rounded-2xl p-6 sm:p-8 shadow-2xl text-white">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h2 className="text-2xl sm:text-3xl font-bold mb-2">Loan Management</h2>
+            <p className="text-purple-100">Comprehensive loan tracking and management</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button 
+              onClick={() => setShowBulkForm(true)}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-lg font-semibold"
+            >
+              <Zap className="mr-2 h-5 w-5" />
+              Bulk Collection
+            </Button>
+            <Button 
+              onClick={() => setShowForm(!showForm)}
+              className="bg-white text-purple-600 hover:bg-purple-50 px-6 py-3 rounded-xl shadow-lg font-semibold"
+            >
+              <Plus className="mr-2 h-5 w-5" />
+              Add New Loan
+            </Button>
+          </div>
         </div>
-        <Button 
-          onClick={() => setShowForm(!showForm)}
-          className="bg-blue-600 hover:bg-blue-700 text-white"
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Add New Loan
-        </Button>
       </div>
+
+      {/* Bulk Collection Modal */}
+      {showBulkForm && (
+        <Card className="bg-white shadow-2xl border-0 rounded-2xl overflow-hidden">
+          <CardHeader className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+            <CardTitle className="text-xl">100 Days Bulk Collection</CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="space-y-4">
+              <div>
+                <Label>Select Loan</Label>
+                <select 
+                  className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-emerald-500"
+                  value={bulkCollectionData.loanId}
+                  onChange={(e) => setBulkCollectionData(prev => ({ ...prev, loanId: e.target.value }))}
+                >
+                  <option value="">Select a loan</option>
+                  {loans.filter(loan => loan.balance > 0).map(loan => (
+                    <option key={loan.id} value={loan.id}>
+                      {loan.id} - {loan.customerName} (Balance: {formatCurrency(loan.balance)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label>Collected By</Label>
+                <Input
+                  value={bulkCollectionData.collectedBy}
+                  onChange={(e) => setBulkCollectionData(prev => ({ ...prev, collectedBy: e.target.value }))}
+                  placeholder="Enter collector name"
+                  className="rounded-xl"
+                />
+              </div>
+              <div>
+                <Label>Remarks</Label>
+                <Input
+                  value={bulkCollectionData.remarks}
+                  onChange={(e) => setBulkCollectionData(prev => ({ ...prev, remarks: e.target.value }))}
+                  placeholder="Additional notes"
+                  className="rounded-xl"
+                />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <Button 
+                  onClick={submitBulkCollection}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-xl"
+                  disabled={!bulkCollectionData.loanId}
+                >
+                  Complete Collection
+                </Button>
+                <Button 
+                  onClick={() => setShowBulkForm(false)}
+                  variant="outline"
+                  className="px-6 py-2 rounded-xl"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {showForm && (
         <Card className="bg-white shadow-lg">
@@ -234,35 +338,45 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
         </Card>
       )}
 
-      <Card className="bg-white shadow-lg">
-        <CardHeader>
-          <CardTitle>All Loans</CardTitle>
+      {/* Enhanced Loans Table */}
+      <Card className="bg-white shadow-2xl border-0 rounded-2xl overflow-hidden">
+        <CardHeader className="bg-gradient-to-r from-slate-800 to-slate-700 text-white p-6">
+          <CardTitle className="text-xl">All Loans</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full table-auto min-w-[1200px]">
-              <thead>
-                <tr className="border-b border-slate-200">
-                  <th className="text-left p-2 font-semibold text-slate-700">Actions</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Loan ID</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Customer</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Date</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Amount</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Net Given</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Daily Pay</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Days</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Total to Receive</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Collected</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Balance</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Status</th>
-                  <th className="text-left p-2 font-semibold text-slate-700">Profit</th>
+            <table className="w-full table-auto min-w-[1400px]">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Actions</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Loan ID</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Customer</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Date</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Amount</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Net Given</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Daily Pay</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Days</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Total to Receive</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Collected</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Balance</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Status</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 border-b">Expected Profit</th>
                 </tr>
               </thead>
               <tbody>
-                {loans.map((loan) => (
-                  <tr key={loan.id} className={`border-b border-slate-100 hover:bg-slate-50 ${loan.isDisabled ? 'opacity-60' : ''}`}>
-                    <td className="p-2">
+                {loans.map((loan, index) => (
+                  <tr key={loan.id} className={`${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-blue-50 transition-colors ${loan.isDisabled ? 'opacity-60' : ''}`}>
+                    <td className="p-4">
                       <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          onClick={() => handleBulkCollection(loan.id)}
+                          className="h-8 w-8 p-0 bg-emerald-500 hover:bg-emerald-600 text-white"
+                          title="100 Days Collection"
+                          disabled={loan.balance <= 0}
+                        >
+                          <Zap className="h-4 w-4" />
+                        </Button>
                         <Button
                           size="sm"
                           variant="outline"
@@ -292,17 +406,17 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
                         </Button>
                       </div>
                     </td>
-                    <td className="p-2 font-medium text-slate-800">{loan.id}</td>
-                    <td className="p-2 text-slate-700">{loan.customerName}</td>
-                    <td className="p-2 text-slate-600">{loan.date}</td>
-                    <td className="p-2 text-slate-700">{formatCurrency(loan.loanAmount)}</td>
-                    <td className="p-2 text-slate-700">{formatCurrency(loan.netGiven)}</td>
-                    <td className="p-2 text-slate-700">{formatCurrency(loan.dailyPay)}</td>
-                    <td className="p-2 text-slate-700">{loan.days}</td>
-                    <td className="p-2 text-slate-700">{formatCurrency(loan.totalToReceive)}</td>
-                    <td className="p-2 text-emerald-600 font-medium">{formatCurrency(loan.collected)}</td>
-                    <td className="p-2 text-red-600 font-medium">{formatCurrency(loan.balance)}</td>
-                    <td className="p-2">
+                    <td className="p-4 font-medium text-slate-800">{loan.id}</td>
+                    <td className="p-4 text-slate-700">{loan.customerName}</td>
+                    <td className="p-4 text-slate-600">{loan.date}</td>
+                    <td className="p-4 text-slate-700 font-semibold">{formatCurrency(loan.loanAmount)}</td>
+                    <td className="p-4 text-blue-600 font-semibold">{formatCurrency(loan.netGiven)}</td>
+                    <td className="p-4 text-slate-700">{formatCurrency(loan.dailyPay)}</td>
+                    <td className="p-4 text-slate-700">{loan.days}</td>
+                    <td className="p-4 text-purple-600 font-semibold">{formatCurrency(loan.totalToReceive)}</td>
+                    <td className="p-4 text-emerald-600 font-bold">{formatCurrency(loan.collected)}</td>
+                    <td className="p-4 text-red-600 font-bold">{formatCurrency(loan.balance)}</td>
+                    <td className="p-4">
                       <Badge variant={
                         loan.status === 'Completed' ? 'default' : 
                         loan.status === 'Disabled' ? 'destructive' : 
@@ -311,14 +425,16 @@ const LoanSummary: React.FC<LoanSummaryProps> = ({
                         {loan.status}
                       </Badge>
                     </td>
-                    <td className="p-2 text-purple-600 font-medium">{formatCurrency(loan.profit)}</td>
+                    <td className="p-4 text-indigo-600 font-bold">{formatCurrency(loan.profit)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {loans.length === 0 && (
-              <div className="text-center py-8 text-slate-500">
-                No loans recorded yet. Add your first loan above.
+              <div className="text-center py-12 text-slate-500">
+                <Wallet className="h-16 w-16 mx-auto mb-4 text-slate-300" />
+                <p className="text-lg">No loans recorded yet</p>
+                <p className="text-sm">Add your first loan above to get started</p>
               </div>
             )}
           </div>

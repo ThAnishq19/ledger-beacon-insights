@@ -18,6 +18,7 @@ const Index = () => {
     funds, 
     addLoan, 
     addCollection, 
+    addBulkCollection,
     addFund, 
     updateLoan,
     deleteLoan,
@@ -110,6 +111,7 @@ const Index = () => {
                 deleteLoan={deleteLoan}
                 toggleLoanStatus={toggleLoanStatus}
                 getLoanCashFlow={getLoanCashFlow}
+                addBulkCollection={addBulkCollection}
               />
             </TabsContent>
 
