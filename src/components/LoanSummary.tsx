@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Loan, Collection } from "@/hooks/useFinanceData";
-import { Plus, Trash2, Power, Eye, Zap } from "lucide-react";
+import { Plus, Trash2, Power, Eye, Zap, Wallet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import LoanCashFlowModal from "./LoanCashFlowModal";
 
