@@ -36,6 +36,11 @@ const Index = () => {
     setActiveTab("loans");
   };
 
+  const handleClearAllData = () => {
+    // This will trigger a reload after clearing localStorage in Dashboard
+    console.log('All data cleared successfully');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <div className="w-full max-w-full mx-auto px-2 sm:px-4 lg:px-6 py-2 sm:py-4 lg:py-6">
@@ -110,6 +115,7 @@ const Index = () => {
                 collections={collections} 
                 funds={funds}
                 onNavigateToLoans={handleNavigateToLoans}
+                onClearAllData={handleClearAllData}
               />
             </TabsContent>
 

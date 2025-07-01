@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loan, Collection, Fund } from "@/hooks/useFinanceData";
-import { TrendingUp, TrendingDown, DollarSign, AlertCircle, PieChart, BarChart3, Download, Clock, Users, Calendar, AlertTriangle } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, AlertCircle, PieChart, BarChart3, Download, Clock, Users, Calendar, AlertTriangle, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
@@ -12,54 +12,28 @@ interface DashboardProps {
   collections: Collection[];
   funds: Fund[];
   onNavigateToLoans?: () => void;
+  onClearAllData?: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavigateToLoans }) => {
+const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavigateToLoans, onClearAllData }) => {
   const [activeSection, setActiveSection] = useState('overview');
 
   const calculateMetrics = () => {
-    // Calculate current balance from fund tracker with proper inflow/outflow
-    const sortedFunds = [...funds].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    let currentBalance = 0;
-    let totalInflow = 0;
-    let totalOutflow = 0;
+    // Calculate total collections received (all collections)
+    const totalCollections = collections.reduce((sum, collection) => sum + (collection.amountPaid || 0), 0);
     
-    // Process funds to get running balance and totals
-    if (sortedFunds.length > 0) {
-      let runningBalance = 0;
-      sortedFunds.forEach(fund => {
-        totalInflow += fund.inflow || 0;
-        totalOutflow += fund.outflow || 0;
-        runningBalance += (fund.inflow || 0) - (fund.outflow || 0);
-      });
-      currentBalance = runningBalance;
-      
-      // Add recent collections after last fund entry
-      const lastFundDate = sortedFunds.length > 0 ? new Date(sortedFunds[sortedFunds.length - 1].date) : new Date(0);
-      
-      const recentCollections = collections.filter(collection => 
-        new Date(collection.date) > lastFundDate
-      );
-      const recentCollectionAmount = recentCollections.reduce((sum, c) => sum + (c.amountPaid || 0), 0);
-      currentBalance += recentCollectionAmount;
-      totalInflow += recentCollectionAmount;
-      
-      // Subtract recent loan disbursements (net given)
-      const recentLoans = loans.filter(loan => 
-        !loan.isDisabled && new Date(loan.date) > lastFundDate
-      );
-      const recentLoanAmount = recentLoans.reduce((sum, loan) => sum + (loan.netGiven || 0), 0);
-      currentBalance -= recentLoanAmount;
-      totalOutflow += recentLoanAmount;
-    } else {
-      // If no funds data, calculate from loans and collections only
-      totalInflow = collections.reduce((sum, collection) => sum + (collection.amountPaid || 0), 0);
-      totalOutflow = loans.reduce((sum, loan) => sum + (loan.netGiven || 0), 0);
-      currentBalance = totalInflow - totalOutflow;
-    }
+    // Total amount given out to customers (net given)
+    const totalOutflow = loans.reduce((sum, loan) => sum + (loan.netGiven || 0), 0);
     
-    // Total collections received (all collections)
-    const totalCollections = collections.reduce((sum, collection) => sum + collection.amountPaid, 0);
+    // Current balance: total collections - total outflow + fund inflows - fund outflows
+    const fundBalance = funds.reduce((sum, fund) => sum + (fund.inflow || 0) - (fund.outflow || 0), 0);
+    const currentBalance = totalCollections - totalOutflow + fundBalance;
+    
+    // Total inflow: collections + fund inflows
+    const totalInflow = totalCollections + funds.reduce((sum, fund) => sum + (fund.inflow || 0), 0);
+    
+    // Total outflow: net given + fund outflows
+    const totalOutflowWithFunds = totalOutflow + funds.reduce((sum, fund) => sum + (fund.outflow || 0), 0);
     
     // Outstanding amount: sum of all remaining balances for active loans
     const outstandingAmount = loans
@@ -110,7 +84,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavi
     return {
       currentBalance,
       totalInflow,
-      totalOutflow,
+      totalOutflow: totalOutflowWithFunds,
       availableCash,
       totalCollections,
       outstandingAmount,
@@ -132,100 +106,99 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavi
     }).format(amount || 0);
   };
 
-  // Enhanced Chart data preparation with better customer counts
-  const monthlyData = () => {
-    const monthMap = new Map();
+  // Customer payment collection data by days and customer name
+  const customerPaymentData = () => {
+    const customerMap = new Map();
     
-    // Process loans by month
+    // Process each loan to calculate payment days and collections
     loans.forEach(loan => {
-      const monthKey = new Date(loan.date).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
-      if (!monthMap.has(monthKey)) {
-        monthMap.set(monthKey, {
-          month: monthKey,
-          loans: 0,
-          amount: 0,
-          collections: 0,
-          customers: 0,
-          hundredDayCustomers: 0
+      if (loan.isDisabled) return;
+      
+      const loanCollections = collections.filter(c => c.loanId === loan.id);
+      const totalCollected = loanCollections.reduce((sum, c) => sum + c.amountPaid, 0);
+      const paymentDays = loanCollections.length; // Number of payment days
+      
+      if (totalCollected > 0) {
+        customerMap.set(loan.id, {
+          customerName: loan.customerName.length > 10 ? loan.customerName.substring(0, 10) + '...' : loan.customerName,
+          fullName: loan.customerName,
+          paymentDays,
+          totalCollected,
+          dailyPay: loan.dailyPay,
+          loanAmount: loan.loanAmount,
+          loanId: loan.id
         });
       }
-      const monthData = monthMap.get(monthKey);
-      monthData.loans += 1;
-      monthData.amount += loan.netGiven;
-      monthData.customers += 1;
-      if (loan.days === 100) {
-        monthData.hundredDayCustomers += 1;
-      }
     });
 
-    // Process collections by month
-    collections.forEach(collection => {
-      const monthKey = new Date(collection.date).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
-      if (monthMap.has(monthKey)) {
-        monthMap.get(monthKey).collections += collection.amountPaid;
-      }
-    });
-
-    return Array.from(monthMap.values()).sort((a, b) => {
-      const dateA = new Date(a.month + ' 1');
-      const dateB = new Date(b.month + ' 1');
-      return dateA.getTime() - dateB.getTime();
-    });
+    return Array.from(customerMap.values()).sort((a, b) => b.totalCollected - a.totalCollected);
   };
 
-  const chartData = monthlyData();
+  const chartData = customerPaymentData();
 
-  // Enhanced customer status data with proper counts
+  // Enhanced customer status data with proper counts and click handlers
   const customerStatusData = [
     { 
       name: 'Active Loans', 
       value: loans.filter(l => l.status === 'Ongoing' && !l.isDisabled).length, 
       color: '#10b981',
-      description: 'Currently ongoing loans'
+      description: 'Currently ongoing loans',
+      onClick: () => {
+        setActiveSection('active');
+        console.log('Navigating to active loans');
+      }
     },
     { 
       name: 'Completed', 
       value: loans.filter(l => l.status === 'Completed').length, 
       color: '#3b82f6',
-      description: 'Successfully completed loans'
+      description: 'Successfully completed loans',
+      onClick: () => {
+        setActiveSection('completed');
+        console.log('Navigating to completed loans');
+      }
     },
     { 
       name: '100-Day Plans', 
       value: metrics.hundredDayCustomers.length, 
       color: '#8b5cf6',
-      description: '100-day loan customers'
+      description: '100-day loan customers',
+      onClick: () => {
+        setActiveSection('hundred-day');
+        console.log('Navigating to 100-day customers');
+      }
     },
     { 
       name: 'Near Closing', 
       value: metrics.nearToClosingCustomers.length, 
       color: '#f59e0b',
-      description: 'Customers with ≤10 days remaining'
+      description: 'Customers with ≤10 days remaining',
+      onClick: () => {
+        setActiveSection('near-closing');
+        console.log('Navigating to near closing customers');
+      }
     },
     { 
       name: 'Payment Delayed', 
       value: metrics.paymentDelayCustomers.length, 
       color: '#ef4444',
-      description: 'Customers with 3+ days delay'
+      description: 'Customers with 3+ days delay',
+      onClick: () => {
+        setActiveSection('payment-delayed');
+        console.log('Navigating to payment delayed customers');
+      }
     },
   ];
 
-  // Day-wise loan distribution for 100-day analysis
-  const dayWiseData = () => {
-    const dayMap = new Map();
-    loans.filter(loan => !loan.isDisabled).forEach(loan => {
-      const days = loan.days || 100;
-      if (!dayMap.has(days)) {
-        dayMap.set(days, { days, customers: 0, totalAmount: 0 });
+  const handleClearAllData = () => {
+    if (window.confirm('Are you sure you want to clear all data? This action cannot be undone.')) {
+      localStorage.clear();
+      if (onClearAllData) {
+        onClearAllData();
       }
-      const dayData = dayMap.get(days);
-      dayData.customers += 1;
-      dayData.totalAmount += loan.netGiven;
-    });
-    
-    return Array.from(dayMap.values()).sort((a, b) => a.days - b.days);
+      window.location.reload();
+    }
   };
-
-  const dayWiseChartData = dayWiseData();
 
   const downloadBalanceSheet = () => {
     const balanceSheetData = {
@@ -417,6 +390,75 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavi
     </div>
   );
 
+  const renderCustomersByStatus = () => {
+    const getCustomersByStatus = () => {
+      switch (activeSection) {
+        case 'active':
+          return loans.filter(l => l.status === 'Ongoing' && !l.isDisabled);
+        case 'completed':
+          return loans.filter(l => l.status === 'Completed');
+        case 'hundred-day':
+          return metrics.hundredDayCustomers;
+        case 'near-closing':
+          return metrics.nearToClosingCustomers;
+        case 'payment-delayed':
+          return metrics.paymentDelayCustomers;
+        default:
+          return [];
+      }
+    };
+
+    const customers = getCustomersByStatus();
+    const statusTitles = {
+      'active': 'Active Loans',
+      'completed': 'Completed Loans',
+      'hundred-day': '100-Day Plan Customers',
+      'near-closing': 'Near Closing Customers',
+      'payment-delayed': 'Payment Delayed Customers'
+    };
+
+    if (['active', 'completed', 'hundred-day', 'near-closing', 'payment-delayed'].includes(activeSection)) {
+      return (
+        <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
+          <CardHeader className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 sm:p-6">
+            <CardTitle className="text-lg sm:text-xl font-bold flex items-center justify-between">
+              <span>{statusTitles[activeSection as keyof typeof statusTitles]}</span>
+              <Button 
+                onClick={() => setActiveSection('overview')}
+                className="bg-white/20 hover:bg-white/30 text-white px-3 py-1 text-sm"
+              >
+                Back to Overview
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 sm:p-6">
+            {customers.length > 0 ? (
+              <div className="grid gap-3 sm:gap-4">
+                {customers.map((loan) => (
+                  <div key={loan.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl sm:rounded-2xl border border-blue-200 gap-3 sm:gap-0">
+                    <div className="min-w-0 flex-1">
+                      <h4 className="font-semibold text-slate-800 truncate">{loan.customerName}</h4>
+                      <p className="text-sm text-slate-600">Loan ID: {loan.id}</p>
+                      <p className="text-xs text-blue-600">Amount: {formatCurrency(loan.loanAmount)}</p>
+                      <p className="text-xs text-slate-500">Daily Pay: {formatCurrency(loan.dailyPay)}</p>
+                    </div>
+                    <div className="text-left sm:text-right">
+                      <p className="font-bold text-blue-600">{loan.status}</p>
+                      <p className="text-sm text-slate-600">Balance: {formatCurrency(loan.balance || 0)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-center text-slate-500 py-8">No customers found in this category</p>
+            )}
+          </CardContent>
+        </Card>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 p-2 sm:p-4 lg:p-6">
       {/* Modern Header with Navigation */}
@@ -458,13 +500,22 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavi
                   <p className="text-blue-200 text-xs sm:text-sm">Available Cash</p>
                   <p className="text-xl sm:text-2xl lg:text-3xl font-bold break-all">{formatCurrency(metrics.availableCash)}</p>
                 </div>
-                <Button 
-                  onClick={downloadBalanceSheet}
-                  className="bg-white text-purple-600 hover:bg-blue-50 px-4 sm:px-6 py-2 sm:py-3 rounded-xl sm:rounded-2xl shadow-lg font-semibold transition-all duration-300 hover:scale-105 text-sm sm:text-base w-full lg:w-auto"
-                >
-                  <Download className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
-                  Balance Sheet
-                </Button>
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={downloadBalanceSheet}
+                    className="bg-white text-purple-600 hover:bg-blue-50 px-4 sm:px-6 py-2 sm:py-3 rounded-xl sm:rounded-2xl shadow-lg font-semibold transition-all duration-300 hover:scale-105 text-sm sm:text-base"
+                  >
+                    <Download className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
+                    Balance Sheet
+                  </Button>
+                  <Button 
+                    onClick={handleClearAllData}
+                    className="bg-red-500 hover:bg-red-600 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl sm:rounded-2xl shadow-lg font-semibold transition-all duration-300 hover:scale-105 text-sm sm:text-base"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
+                    Clear Data
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -536,15 +587,14 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavi
               <CardHeader className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 sm:p-6">
                 <CardTitle className="text-lg sm:text-xl font-bold flex items-center">
                   <BarChart3 className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />
-                  <span className="break-words">Monthly Customer & Performance Analysis</span>
+                  <span className="break-words">Customer Payment Collection Analysis</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-4 sm:p-6">
                 <ChartContainer
                   config={{
-                    customers: { label: "Customers", color: "#3b82f6" },
-                    collections: { label: "Collections", color: "#10b981" },
-                    hundredDayCustomers: { label: "100-Day Customers", color: "#8b5cf6" }
+                    paymentDays: { label: "Payment Days", color: "#3b82f6" },
+                    totalCollected: { label: "Total Collected", color: "#10b981" }
                   }}
                   className="h-[250px] sm:h-[300px]"
                 >
@@ -552,14 +602,31 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavi
                     <BarChart data={chartData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis 
-                        dataKey="month" 
-                        fontSize={12}
-                        tick={{ fontSize: 10 }}
+                        dataKey="customerName" 
+                        fontSize={10}
+                        tick={{ fontSize: 8 }}
+                        angle={-45}
+                        textAnchor="end"
+                        height={60}
                       />
                       <YAxis fontSize={12} />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Bar dataKey="customers" fill="#3b82f6" name="Total Customers" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="hundredDayCustomers" fill="#8b5cf6" name="100-Day Customers" radius={[4, 4, 0, 0]} />
+                      <ChartTooltip 
+                        content={({ active, payload, label }) => {
+                          if (active && payload && payload.length) {
+                            const data = payload[0].payload;
+                            return (
+                              <div className="bg-white p-3 border rounded shadow-lg">
+                                <p className="font-semibold">{data.fullName}</p>
+                                <p className="text-blue-600">Payment Days: {data.paymentDays}</p>
+                                <p className="text-green-600">Total Collected: {formatCurrency(data.totalCollected)}</p>
+                                <p className="text-slate-600">Loan ID: {data.loanId}</p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <Bar dataKey="paymentDays" fill="#3b82f6" name="Payment Days" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </ChartContainer>
@@ -576,7 +643,11 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavi
               <CardContent className="p-4 sm:p-6">
                 <div className="space-y-3 sm:space-y-4">
                   {customerStatusData.map((item, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-r from-slate-50 to-white shadow-sm">
+                    <div 
+                      key={index} 
+                      className="flex items-center justify-between p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-r from-slate-50 to-white shadow-sm cursor-pointer hover:shadow-md transition-all duration-200 transform hover:scale-102"
+                      onClick={item.onClick}
+                    >
                       <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                         <div 
                           className="w-3 h-3 sm:w-4 sm:h-4 rounded-full flex-shrink-0" 
@@ -607,147 +678,55 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavi
               </CardContent>
             </Card>
           </div>
-
-          {/* Day-wise Analysis Chart - Full width on mobile */}
-          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 sm:p-6">
-              <CardTitle className="text-lg sm:text-xl font-bold flex items-center">
-                <Calendar className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />
-                Loan Duration Analysis (Days vs Customers)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 sm:p-6">
-              <ChartContainer
-                config={{
-                  customers: { label: "Number of Customers", color: "#8b5cf6" },
-                  totalAmount: { label: "Total Amount", color: "#3b82f6" }
-                }}
-                className="h-[250px] sm:h-[300px]"
-              >
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={dayWiseChartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="days" 
-                      label={{ value: 'Loan Duration (Days)', position: 'insideBottom', offset: -5 }}
-                      fontSize={12}
-                    />
-                    <YAxis fontSize={12} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Bar dataKey="customers" fill="#8b5cf6" name="Customers" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartContainer>
-            </CardContent>
-          </Card>
         </div>
       )}
 
-      {activeSection === 'customers' && (
-        <div className="space-y-6 sm:space-y-8">
-          {/* Near to Closing Customers */}
-          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-4 sm:p-6">
-              <CardTitle className="text-lg sm:text-xl font-bold flex items-center">
-                <Clock className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />
-                Near to Closing (10 Days Buffer)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 sm:p-6">
-              {metrics.nearToClosingCustomers.length > 0 ? (
-                <div className="grid gap-3 sm:gap-4">
-                  {metrics.nearToClosingCustomers.map((loan) => {
-                    const remainingAmount = Math.max(0, loan.loanAmount - loan.collected);
-                    const remainingDays = Math.ceil(remainingAmount / loan.dailyPay);
-                    return (
-                      <div key={loan.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl sm:rounded-2xl border border-amber-200 gap-3 sm:gap-0">
-                        <div className="min-w-0 flex-1">
-                          <h4 className="font-semibold text-slate-800 truncate">{loan.customerName}</h4>
-                          <p className="text-sm text-slate-600">Loan ID: {loan.id}</p>
-                          <p className="text-xs text-amber-600">Total Duration: {loan.days} days</p>
-                        </div>
-                        <div className="text-left sm:text-right">
-                          <p className="font-bold text-amber-600">{remainingDays} days left</p>
-                          <p className="text-sm text-slate-600">{formatCurrency(remainingAmount)} remaining</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-center text-slate-500 py-8">No customers nearing closure</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Payment Delay Customers */}
-          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-red-500 to-pink-500 text-white p-4 sm:p-6">
-              <CardTitle className="text-lg sm:text-xl font-bold flex items-center">
-                <AlertTriangle className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />
-                Payment Delayed (3+ Days)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 sm:p-6">
-              {metrics.paymentDelayCustomers.length > 0 ? (
-                <div className="grid gap-3 sm:gap-4">
-                  {metrics.paymentDelayCustomers.map((loan) => {
-                    const lastCollection = collections
-                      .filter(c => c.loanId === loan.id)
-                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-                    
-                    const daysSincePayment = lastCollection 
-                      ? Math.floor((new Date().getTime() - new Date(lastCollection.date).getTime()) / (1000 * 60 * 60 * 24))
-                      : Math.floor((new Date().getTime() - new Date(loan.date).getTime()) / (1000 * 60 * 60 * 24));
-                    
-                    return (
-                      <div key={loan.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 bg-gradient-to-r from-red-50 to-pink-50 rounded-xl sm:rounded-2xl border border-red-200 gap-3 sm:gap-0">
-                        <div className="min-w-0 flex-1">
-                          <h4 className="font-semibold text-slate-800 truncate">{loan.customerName}</h4>
-                          <p className="text-sm text-slate-600">Loan ID: {loan.id}</p>
-                          <p className="text-xs text-red-600 break-words">
-                            Last payment: {lastCollection ? lastCollection.date : 'No payments yet'}
-                          </p>
-                          <p className="text-xs text-slate-500">Total Duration: {loan.days} days</p>
-                        </div>
-                        <div className="text-left sm:text-right">
-                          <p className="font-bold text-red-600">{daysSincePayment} days overdue</p>
-                          <p className="text-sm text-slate-600">{formatCurrency(loan.balance)} pending</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-center text-slate-500 py-8">All payments are up to date</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {/* Render customer lists based on selected status */}
+      {renderCustomersByStatus()}
 
       {activeSection === 'analytics' && (
         <div className="grid gap-4 sm:gap-6 grid-cols-1 xl:grid-cols-2">
           <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
             <CardHeader className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 sm:p-6">
-              <CardTitle className="text-lg sm:text-xl font-bold">Performance Trends</CardTitle>
+              <CardTitle className="text-lg sm:text-xl font-bold">Collection Trends by Customer</CardTitle>
             </CardHeader>
             <CardContent className="p-4 sm:p-6">
               <ChartContainer
                 config={{
-                  collections: { label: "Collections", color: "#10b981" }
+                  totalCollected: { label: "Total Collected", color: "#10b981" }
                 }}
                 className="h-[250px] sm:h-[300px]"
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" fontSize={12} />
+                    <XAxis 
+                      dataKey="customerName" 
+                      fontSize={10}
+                      tick={{ fontSize: 8 }}
+                      angle={-45}
+                      textAnchor="end"
+                      height={60}
+                    />
                     <YAxis fontSize={12} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <ChartTooltip 
+                      content={({ active, payload, label }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div className="bg-white p-3 border rounded shadow-lg">
+                              <p className="font-semibold">{data.fullName}</p>
+                              <p className="text-green-600">Total Collected: {formatCurrency(data.totalCollected)}</p>
+                              <p className="text-blue-600">Payment Days: {data.paymentDays}</p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
                     <Line 
                       type="monotone" 
-                      dataKey="collections" 
+                      dataKey="totalCollected" 
                       stroke="#10b981" 
                       strokeWidth={3}
                       dot={{ fill: '#10b981', strokeWidth: 2, r: 6 }}
