@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +12,8 @@ import { exportToExcel } from "@/utils/excelExport";
 import { useFinanceData } from "@/hooks/useFinanceData";
 
 const Index = () => {
+  const [activeTab, setActiveTab] = useState("dashboard");
+  
   const { 
     loans, 
     collections, 
@@ -27,6 +30,10 @@ const Index = () => {
 
   const handleExportAll = () => {
     exportToExcel(loans, collections, funds);
+  };
+
+  const handleNavigateToLoans = () => {
+    setActiveTab("loans");
   };
 
   return (
@@ -60,7 +67,7 @@ const Index = () => {
         </div>
 
         {/* Premium Tabs - Light Theme */}
-        <Tabs defaultValue="dashboard" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 mb-4 sm:mb-6 lg:mb-8 bg-white shadow-lg rounded-lg sm:rounded-xl lg:rounded-2xl p-1 sm:p-2 border border-slate-200 gap-1 sm:gap-0">
             <TabsTrigger 
               value="dashboard" 
@@ -98,7 +105,12 @@ const Index = () => {
 
           <div className="w-full overflow-hidden">
             <TabsContent value="dashboard" className="space-y-4 sm:space-y-6 w-full">
-              <Dashboard loans={loans} collections={collections} funds={funds} />
+              <Dashboard 
+                loans={loans} 
+                collections={collections} 
+                funds={funds}
+                onNavigateToLoans={handleNavigateToLoans}
+              />
             </TabsContent>
 
             <TabsContent value="loans" className="space-y-4 sm:space-y-6 w-full">

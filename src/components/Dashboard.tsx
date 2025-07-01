@@ -1,54 +1,67 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loan, Collection, Fund } from "@/hooks/useFinanceData";
-import { TrendingUp, TrendingDown, DollarSign, Target, Wallet, AlertCircle, PieChart, BarChart3, Download, Clock, Users, Calendar, AlertTriangle } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, AlertCircle, PieChart, BarChart3, Download, Clock, Users, Calendar, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LineChart, Line, PieChart as RechartsPieChart, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LineChart, Line } from "recharts";
 
 interface DashboardProps {
   loans: Loan[];
   collections: Collection[];
   funds: Fund[];
+  onNavigateToLoans?: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
+const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds, onNavigateToLoans }) => {
   const [activeSection, setActiveSection] = useState('overview');
 
   const calculateMetrics = () => {
-    // Get current balance from fund tracker
+    // Calculate current balance from fund tracker with proper inflow/outflow
     const sortedFunds = [...funds].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    let cashInHand = 0;
+    let currentBalance = 0;
+    let totalInflow = 0;
+    let totalOutflow = 0;
     
+    // Process funds to get running balance and totals
     if (sortedFunds.length > 0) {
-      cashInHand = sortedFunds[sortedFunds.length - 1].balance || 0;
+      let runningBalance = 0;
+      sortedFunds.forEach(fund => {
+        totalInflow += fund.inflow || 0;
+        totalOutflow += fund.outflow || 0;
+        runningBalance += (fund.inflow || 0) - (fund.outflow || 0);
+      });
+      currentBalance = runningBalance;
       
-      // Add recent transactions after last fund entry
-      const lastFundDate = new Date(sortedFunds[sortedFunds.length - 1].date);
+      // Add recent collections after last fund entry
+      const lastFundDate = sortedFunds.length > 0 ? new Date(sortedFunds[sortedFunds.length - 1].date) : new Date(0);
+      
+      const recentCollections = collections.filter(collection => 
+        new Date(collection.date) > lastFundDate
+      );
+      const recentCollectionAmount = recentCollections.reduce((sum, c) => sum + (c.amountPaid || 0), 0);
+      currentBalance += recentCollectionAmount;
+      totalInflow += recentCollectionAmount;
       
       // Subtract recent loan disbursements (net given)
       const recentLoans = loans.filter(loan => 
         !loan.isDisabled && new Date(loan.date) > lastFundDate
       );
       const recentLoanAmount = recentLoans.reduce((sum, loan) => sum + (loan.netGiven || 0), 0);
-      cashInHand -= recentLoanAmount;
-      
-      // Add recent collections
-      const recentCollections = collections.filter(collection => 
-        new Date(collection.date) > lastFundDate
-      );
-      const recentCollectionAmount = recentCollections.reduce((sum, c) => sum + (c.amountPaid || 0), 0);
-      cashInHand += recentCollectionAmount;
+      currentBalance -= recentLoanAmount;
+      totalOutflow += recentLoanAmount;
+    } else {
+      // If no funds data, calculate from loans and collections only
+      totalInflow = collections.reduce((sum, collection) => sum + (collection.amountPaid || 0), 0);
+      totalOutflow = loans.reduce((sum, loan) => sum + (loan.netGiven || 0), 0);
+      currentBalance = totalInflow - totalOutflow;
     }
     
-    // Total amount invested (net given to customers)
-    const totalInvestedAmount = loans.reduce((sum, loan) => sum + loan.netGiven, 0);
-    
-    // Total collections received
+    // Total collections received (all collections)
     const totalCollections = collections.reduce((sum, collection) => sum + collection.amountPaid, 0);
     
-    // Fixed Outstanding amount calculation: Total loan amount - collected amount for active loans only
+    // Outstanding amount: sum of all remaining balances for active loans
     const outstandingAmount = loans
       .filter(loan => !loan.isDisabled && loan.status !== 'Completed')
       .reduce((sum, loan) => {
@@ -62,6 +75,9 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
     const expectedProfit = loans.reduce((sum, loan) => {
       return sum + loan.deduction + (loan.loanAmount - loan.netGiven);
     }, 0);
+
+    // Available cash = current balance
+    const availableCash = currentBalance;
 
     // Near to closing customers (10 days buffer)
     const nearToClosingCustomers = loans.filter(loan => {
@@ -92,8 +108,10 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
     const hundredDayCustomers = loans.filter(loan => loan.days === 100);
 
     return {
-      cashInHand,
-      totalInvestedAmount,
+      currentBalance,
+      totalInflow,
+      totalOutflow,
+      availableCash,
       totalCollections,
       outstandingAmount,
       expectedProfit,
@@ -212,10 +230,12 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
   const downloadBalanceSheet = () => {
     const balanceSheetData = {
       date: new Date().toLocaleDateString('en-IN'),
-      investedAmount: metrics.totalInvestedAmount,
+      currentBalance: metrics.currentBalance,
+      totalInflow: metrics.totalInflow,
+      totalOutflow: metrics.totalOutflow,
+      availableCash: metrics.availableCash,
       totalCollections: metrics.totalCollections,
       outstandingAmount: metrics.outstandingAmount,
-      cashInHand: metrics.cashInHand,
       expectedProfit: metrics.expectedProfit,
       loanDetails: loans.map(loan => ({
         loanId: loan.id,
@@ -259,16 +279,20 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
         
         <div class="summary">
           <div class="metric-card">
-            <div class="metric-title">Cash in Hand</div>
-            <div class="metric-value">${formatCurrency(balanceSheetData.cashInHand)}</div>
+            <div class="metric-title">Current Balance</div>
+            <div class="metric-value">${formatCurrency(balanceSheetData.currentBalance)}</div>
           </div>
           <div class="metric-card">
-            <div class="metric-title">Total Invested</div>
-            <div class="metric-value">${formatCurrency(balanceSheetData.investedAmount)}</div>
+            <div class="metric-title">Total Inflow</div>
+            <div class="metric-value">${formatCurrency(balanceSheetData.totalInflow)}</div>
           </div>
           <div class="metric-card">
-            <div class="metric-title">Total Collections</div>
-            <div class="metric-value">${formatCurrency(balanceSheetData.totalCollections)}</div>
+            <div class="metric-title">Total Outflow</div>
+            <div class="metric-value">${formatCurrency(balanceSheetData.totalOutflow)}</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Available Cash</div>
+            <div class="metric-value">${formatCurrency(balanceSheetData.availableCash)}</div>
           </div>
           <div class="metric-card">
             <div class="metric-title">Outstanding Amount</div>
@@ -343,7 +367,8 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
     gradient,
     textColor = "white",
     subtitle,
-    trend
+    trend,
+    onClick
   }: { 
     title: string; 
     value: number | string; 
@@ -352,35 +377,39 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
     textColor?: string;
     subtitle?: string;
     trend?: { value: number; isPositive: boolean };
+    onClick?: () => void;
   }) => (
-    <div className={`relative overflow-hidden rounded-3xl p-6 shadow-2xl hover:shadow-3xl transition-all duration-500 transform hover:-translate-y-3 hover:scale-105 ${gradient}`}>
+    <div 
+      className={`relative overflow-hidden rounded-2xl lg:rounded-3xl p-4 sm:p-6 shadow-2xl hover:shadow-3xl transition-all duration-500 transform hover:-translate-y-2 hover:scale-105 ${gradient} ${onClick ? 'cursor-pointer' : ''}`}
+      onClick={onClick}
+    >
       <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
-      <div className="absolute top-4 right-4 opacity-20">
-        <Icon className="h-16 w-16" />
+      <div className="absolute top-2 right-2 sm:top-4 sm:right-4 opacity-20">
+        <Icon className="h-12 w-12 sm:h-16 sm:w-16" />
       </div>
       <div className="relative z-10">
-        <div className="flex items-center justify-between mb-4">
-          <div className={`p-3 rounded-2xl bg-white/20 backdrop-blur-sm`}>
-            <Icon className={`h-6 w-6 ${textColor === 'white' ? 'text-white' : 'text-gray-800'}`} />
+        <div className="flex items-center justify-between mb-3 sm:mb-4">
+          <div className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-white/20 backdrop-blur-sm`}>
+            <Icon className={`h-4 w-4 sm:h-6 sm:w-6 ${textColor === 'white' ? 'text-white' : 'text-gray-800'}`} />
           </div>
           {trend && (
-            <div className={`flex items-center space-x-1 px-3 py-1 rounded-full bg-white/20 backdrop-blur-sm`}>
+            <div className={`flex items-center space-x-1 px-2 sm:px-3 py-1 rounded-full bg-white/20 backdrop-blur-sm`}>
               {trend.isPositive ? 
-                <TrendingUp className="h-4 w-4 text-white" /> : 
-                <TrendingDown className="h-4 w-4 text-white" />
+                <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4 text-white" /> : 
+                <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4 text-white" />
               }
-              <span className="text-sm font-medium text-white">{Math.abs(trend.value)}%</span>
+              <span className="text-xs sm:text-sm font-medium text-white">{Math.abs(trend.value)}%</span>
             </div>
           )}
         </div>
-        <h3 className={`text-sm font-semibold mb-2 ${textColor === 'white' ? 'text-white/90' : 'text-gray-600'}`}>
+        <h3 className={`text-xs sm:text-sm font-semibold mb-2 ${textColor === 'white' ? 'text-white/90' : 'text-gray-600'}`}>
           {title}
         </h3>
-        <p className={`text-3xl font-bold mb-2 ${textColor === 'white' ? 'text-white' : 'text-gray-900'}`}>
+        <p className={`text-xl sm:text-2xl lg:text-3xl font-bold mb-2 ${textColor === 'white' ? 'text-white' : 'text-gray-900'} break-all`}>
           {typeof value === 'number' ? formatCurrency(value) : value}
         </p>
         {subtitle && (
-          <p className={`text-sm ${textColor === 'white' ? 'text-white/80' : 'text-gray-500'}`}>
+          <p className={`text-xs sm:text-sm ${textColor === 'white' ? 'text-white/80' : 'text-gray-500'}`}>
             {subtitle}
           </p>
         )}
@@ -389,48 +418,51 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 p-2 sm:p-4 lg:p-6">
       {/* Modern Header with Navigation */}
-      <div className="mb-8">
-        <div className="bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 rounded-3xl p-8 shadow-2xl text-white relative overflow-hidden">
+      <div className="mb-6 sm:mb-8">
+        <div className="bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 rounded-2xl lg:rounded-3xl p-4 sm:p-6 lg:p-8 shadow-2xl text-white relative overflow-hidden">
           <div className="absolute inset-0 bg-grid-pattern opacity-10"></div>
           <div className="relative z-10">
-            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-              <div className="flex items-center gap-6">
-                <div className="w-20 h-20 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
-                  <BarChart3 className="h-10 w-10 text-white" />
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 lg:gap-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white/20 rounded-xl sm:rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                  <BarChart3 className="h-8 w-8 sm:h-10 sm:w-10 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-white to-blue-100 bg-clip-text">
+                  <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2 bg-gradient-to-r from-white to-blue-100 bg-clip-text break-words">
                     Financial Command Center
                   </h1>
-                  <p className="text-blue-100 text-lg">Advanced Business Intelligence Dashboard</p>
-                  <div className="flex items-center gap-4 mt-3">
-                    <Badge className="bg-emerald-500/20 text-emerald-100 border-emerald-300/30">
-                      <Clock className="h-4 w-4 mr-1" />
+                  <p className="text-blue-100 text-sm sm:text-base lg:text-lg">Advanced Business Intelligence Dashboard</p>
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-3">
+                    <Badge className="bg-emerald-500/20 text-emerald-100 border-emerald-300/30 text-xs sm:text-sm">
+                      <Clock className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                       Real-time Data
                     </Badge>
-                    <Badge className="bg-amber-500/20 text-amber-100 border-amber-300/30">
-                      <Users className="h-4 w-4 mr-1" />
+                    <Badge 
+                      className="bg-amber-500/20 text-amber-100 border-amber-300/30 cursor-pointer hover:bg-amber-500/30 transition-colors text-xs sm:text-sm"
+                      onClick={onNavigateToLoans}
+                    >
+                      <Users className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                       {loans.length} Total Loans
                     </Badge>
-                    <Badge className="bg-purple-500/20 text-purple-100 border-purple-300/30">
-                      <Calendar className="h-4 w-4 mr-1" />
+                    <Badge className="bg-purple-500/20 text-purple-100 border-purple-300/30 text-xs sm:text-sm">
+                      <Calendar className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                       {metrics.hundredDayCustomers.length} x 100 Days
                     </Badge>
                   </div>
                 </div>
               </div>
-              <div className="flex flex-col gap-4">
-                <div className="text-right">
-                  <p className="text-blue-200 text-sm">Available Cash</p>
-                  <p className="text-3xl font-bold">{formatCurrency(metrics.cashInHand)}</p>
+              <div className="flex flex-col gap-4 w-full lg:w-auto">
+                <div className="text-right lg:text-right">
+                  <p className="text-blue-200 text-xs sm:text-sm">Available Cash</p>
+                  <p className="text-xl sm:text-2xl lg:text-3xl font-bold break-all">{formatCurrency(metrics.availableCash)}</p>
                 </div>
                 <Button 
                   onClick={downloadBalanceSheet}
-                  className="bg-white text-purple-600 hover:bg-blue-50 px-6 py-3 rounded-2xl shadow-lg font-semibold transition-all duration-300 hover:scale-105"
+                  className="bg-white text-purple-600 hover:bg-blue-50 px-4 sm:px-6 py-2 sm:py-3 rounded-xl sm:rounded-2xl shadow-lg font-semibold transition-all duration-300 hover:scale-105 text-sm sm:text-base w-full lg:w-auto"
                 >
-                  <Download className="mr-2 h-5 w-5" />
+                  <Download className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
                   Balance Sheet
                 </Button>
               </div>
@@ -439,7 +471,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex gap-2 mt-6 bg-white/60 backdrop-blur-sm p-2 rounded-2xl shadow-lg">
+        <div className="flex flex-wrap gap-2 mt-6 bg-white/60 backdrop-blur-sm p-2 rounded-xl sm:rounded-2xl shadow-lg">
           {[
             { id: 'overview', label: 'Overview', icon: BarChart3 },
             { id: 'analytics', label: 'Analytics', icon: TrendingUp },
@@ -449,14 +481,15 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
             <button
               key={tab.id}
               onClick={() => setActiveSection(tab.id)}
-              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
+              className={`flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl font-semibold transition-all duration-300 text-xs sm:text-sm ${
                 activeSection === tab.id
                   ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg'
                   : 'text-gray-600 hover:bg-white/50'
               }`}
             >
-              <tab.icon className="h-4 w-4" />
-              {tab.label}
+              <tab.icon className="h-3 w-3 sm:h-4 sm:w-4" />
+              <span className="hidden sm:inline">{tab.label}</span>
+              <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
             </button>
           ))}
         </div>
@@ -464,29 +497,29 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
 
       {/* Main Content */}
       {activeSection === 'overview' && (
-        <div className="space-y-8">
+        <div className="space-y-6 sm:space-y-8">
           {/* Primary Metrics */}
-          <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard
-              title="Cash in Hand"
-              value={metrics.cashInHand}
+              title="Current Balance"
+              value={metrics.currentBalance}
               icon={DollarSign}
               gradient="bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500"
-              subtitle="Available liquidity"
+              subtitle="After disbursing & collections"
             />
             <MetricCard
-              title="Total Invested"
-              value={metrics.totalInvestedAmount}
-              icon={Wallet}
-              gradient="bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-500"
-              subtitle="Capital deployed"
-            />
-            <MetricCard
-              title="Collections"
-              value={metrics.totalCollections}
+              title="Total Inflow"
+              value={metrics.totalInflow}
               icon={TrendingUp}
+              gradient="bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-500"
+              subtitle="Total money received"
+            />
+            <MetricCard
+              title="Total Outflow"
+              value={metrics.totalOutflow}
+              icon={TrendingDown}
               gradient="bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500"
-              subtitle="Total received"
+              subtitle="Net given to customers"
             />
             <MetricCard
               title="Outstanding"
@@ -497,29 +530,33 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
             />
           </div>
 
-          {/* Enhanced Chart Section */}
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
-              <CardHeader className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-6">
-                <CardTitle className="text-xl font-bold flex items-center">
-                  <BarChart3 className="mr-3 h-6 w-6" />
-                  Monthly Customer & Performance Analysis
+          {/* Enhanced Chart Section - Responsive Grid */}
+          <div className="grid gap-4 sm:gap-6 grid-cols-1 xl:grid-cols-2">
+            <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
+              <CardHeader className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 sm:p-6">
+                <CardTitle className="text-lg sm:text-xl font-bold flex items-center">
+                  <BarChart3 className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />
+                  <span className="break-words">Monthly Customer & Performance Analysis</span>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-6">
+              <CardContent className="p-4 sm:p-6">
                 <ChartContainer
                   config={{
                     customers: { label: "Customers", color: "#3b82f6" },
                     collections: { label: "Collections", color: "#10b981" },
                     hundredDayCustomers: { label: "100-Day Customers", color: "#8b5cf6" }
                   }}
-                  className="h-[300px]"
+                  className="h-[250px] sm:h-[300px]"
                 >
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartData}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
+                      <XAxis 
+                        dataKey="month" 
+                        fontSize={12}
+                        tick={{ fontSize: 10 }}
+                      />
+                      <YAxis fontSize={12} />
                       <ChartTooltip content={<ChartTooltipContent />} />
                       <Bar dataKey="customers" fill="#3b82f6" name="Total Customers" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="hundredDayCustomers" fill="#8b5cf6" name="100-Day Customers" radius={[4, 4, 0, 0]} />
@@ -529,32 +566,32 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
               </CardContent>
             </Card>
 
-            <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
-              <CardHeader className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-6">
-                <CardTitle className="text-xl font-bold flex items-center">
-                  <PieChart className="mr-3 h-6 w-6" />
+            <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
+              <CardHeader className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-4 sm:p-6">
+                <CardTitle className="text-lg sm:text-xl font-bold flex items-center">
+                  <PieChart className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />
                   Customer Status Distribution
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-6">
-                <div className="space-y-4">
+              <CardContent className="p-4 sm:p-6">
+                <div className="space-y-3 sm:space-y-4">
                   {customerStatusData.map((item, index) => (
-                    <div key={index} className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-slate-50 to-white shadow-sm">
-                      <div className="flex items-center gap-3">
+                    <div key={index} className="flex items-center justify-between p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-r from-slate-50 to-white shadow-sm">
+                      <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                         <div 
-                          className="w-4 h-4 rounded-full" 
+                          className="w-3 h-3 sm:w-4 sm:h-4 rounded-full flex-shrink-0" 
                           style={{ backgroundColor: item.color }}
                         ></div>
-                        <div>
-                          <span className="font-semibold text-slate-700">{item.name}</span>
-                          <p className="text-xs text-slate-500">{item.description}</p>
+                        <div className="min-w-0 flex-1">
+                          <span className="font-semibold text-slate-700 text-sm sm:text-base block truncate">{item.name}</span>
+                          <p className="text-xs text-slate-500 truncate">{item.description}</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-2xl font-bold" style={{ color: item.color }}>
+                      <div className="flex items-center gap-2 ml-2">
+                        <span className="text-lg sm:text-2xl font-bold" style={{ color: item.color }}>
                           {item.value}
                         </span>
-                        <div className="w-20 h-2 bg-slate-200 rounded-full overflow-hidden">
+                        <div className="w-12 sm:w-20 h-2 bg-slate-200 rounded-full overflow-hidden">
                           <div 
                             className="h-full rounded-full transition-all duration-1000"
                             style={{ 
@@ -571,27 +608,31 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
             </Card>
           </div>
 
-          {/* Day-wise Analysis Chart */}
-          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6">
-              <CardTitle className="text-xl font-bold flex items-center">
-                <Calendar className="mr-3 h-6 w-6" />
+          {/* Day-wise Analysis Chart - Full width on mobile */}
+          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 sm:p-6">
+              <CardTitle className="text-lg sm:text-xl font-bold flex items-center">
+                <Calendar className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />
                 Loan Duration Analysis (Days vs Customers)
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-6">
+            <CardContent className="p-4 sm:p-6">
               <ChartContainer
                 config={{
                   customers: { label: "Number of Customers", color: "#8b5cf6" },
                   totalAmount: { label: "Total Amount", color: "#3b82f6" }
                 }}
-                className="h-[300px]"
+                className="h-[250px] sm:h-[300px]"
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={dayWiseChartData}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="days" label={{ value: 'Loan Duration (Days)', position: 'insideBottom', offset: -5 }} />
-                    <YAxis />
+                    <XAxis 
+                      dataKey="days" 
+                      label={{ value: 'Loan Duration (Days)', position: 'insideBottom', offset: -5 }}
+                      fontSize={12}
+                    />
+                    <YAxis fontSize={12} />
                     <ChartTooltip content={<ChartTooltipContent />} />
                     <Bar dataKey="customers" fill="#8b5cf6" name="Customers" radius={[4, 4, 0, 0]} />
                   </BarChart>
@@ -603,29 +644,29 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
       )}
 
       {activeSection === 'customers' && (
-        <div className="space-y-8">
+        <div className="space-y-6 sm:space-y-8">
           {/* Near to Closing Customers */}
-          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-6">
-              <CardTitle className="text-xl font-bold flex items-center">
-                <Clock className="mr-3 h-6 w-6" />
+          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-4 sm:p-6">
+              <CardTitle className="text-lg sm:text-xl font-bold flex items-center">
+                <Clock className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />
                 Near to Closing (10 Days Buffer)
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-6">
+            <CardContent className="p-4 sm:p-6">
               {metrics.nearToClosingCustomers.length > 0 ? (
-                <div className="grid gap-4">
+                <div className="grid gap-3 sm:gap-4">
                   {metrics.nearToClosingCustomers.map((loan) => {
                     const remainingAmount = Math.max(0, loan.loanAmount - loan.collected);
                     const remainingDays = Math.ceil(remainingAmount / loan.dailyPay);
                     return (
-                      <div key={loan.id} className="flex items-center justify-between p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl border border-amber-200">
-                        <div>
-                          <h4 className="font-semibold text-slate-800">{loan.customerName}</h4>
+                      <div key={loan.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl sm:rounded-2xl border border-amber-200 gap-3 sm:gap-0">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-semibold text-slate-800 truncate">{loan.customerName}</h4>
                           <p className="text-sm text-slate-600">Loan ID: {loan.id}</p>
                           <p className="text-xs text-amber-600">Total Duration: {loan.days} days</p>
                         </div>
-                        <div className="text-right">
+                        <div className="text-left sm:text-right">
                           <p className="font-bold text-amber-600">{remainingDays} days left</p>
                           <p className="text-sm text-slate-600">{formatCurrency(remainingAmount)} remaining</p>
                         </div>
@@ -640,16 +681,16 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
           </Card>
 
           {/* Payment Delay Customers */}
-          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-red-500 to-pink-500 text-white p-6">
-              <CardTitle className="text-xl font-bold flex items-center">
-                <AlertTriangle className="mr-3 h-6 w-6" />
+          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-red-500 to-pink-500 text-white p-4 sm:p-6">
+              <CardTitle className="text-lg sm:text-xl font-bold flex items-center">
+                <AlertTriangle className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />
                 Payment Delayed (3+ Days)
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-6">
+            <CardContent className="p-4 sm:p-6">
               {metrics.paymentDelayCustomers.length > 0 ? (
-                <div className="grid gap-4">
+                <div className="grid gap-3 sm:gap-4">
                   {metrics.paymentDelayCustomers.map((loan) => {
                     const lastCollection = collections
                       .filter(c => c.loanId === loan.id)
@@ -660,16 +701,16 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
                       : Math.floor((new Date().getTime() - new Date(loan.date).getTime()) / (1000 * 60 * 60 * 24));
                     
                     return (
-                      <div key={loan.id} className="flex items-center justify-between p-4 bg-gradient-to-r from-red-50 to-pink-50 rounded-2xl border border-red-200">
-                        <div>
-                          <h4 className="font-semibold text-slate-800">{loan.customerName}</h4>
+                      <div key={loan.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 bg-gradient-to-r from-red-50 to-pink-50 rounded-xl sm:rounded-2xl border border-red-200 gap-3 sm:gap-0">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-semibold text-slate-800 truncate">{loan.customerName}</h4>
                           <p className="text-sm text-slate-600">Loan ID: {loan.id}</p>
-                          <p className="text-xs text-red-600">
+                          <p className="text-xs text-red-600 break-words">
                             Last payment: {lastCollection ? lastCollection.date : 'No payments yet'}
                           </p>
                           <p className="text-xs text-slate-500">Total Duration: {loan.days} days</p>
                         </div>
-                        <div className="text-right">
+                        <div className="text-left sm:text-right">
                           <p className="font-bold text-red-600">{daysSincePayment} days overdue</p>
                           <p className="text-sm text-slate-600">{formatCurrency(loan.balance)} pending</p>
                         </div>
@@ -686,23 +727,23 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
       )}
 
       {activeSection === 'analytics' && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6">
-              <CardTitle className="text-xl font-bold">Performance Trends</CardTitle>
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 xl:grid-cols-2">
+          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 sm:p-6">
+              <CardTitle className="text-lg sm:text-xl font-bold">Performance Trends</CardTitle>
             </CardHeader>
-            <CardContent className="p-6">
+            <CardContent className="p-4 sm:p-6">
               <ChartContainer
                 config={{
                   collections: { label: "Collections", color: "#10b981" }
                 }}
-                className="h-[300px]"
+                className="h-[250px] sm:h-[300px]"
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
+                    <XAxis dataKey="month" fontSize={12} />
+                    <YAxis fontSize={12} />
                     <ChartTooltip content={<ChartTooltipContent />} />
                     <Line 
                       type="monotone" 
@@ -717,62 +758,62 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
             </CardContent>
           </Card>
 
-          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-3xl overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-6">
-              <CardTitle className="text-xl font-bold">Key Ratios</CardTitle>
+          <Card className="bg-white/70 backdrop-blur-sm shadow-2xl border-0 rounded-2xl lg:rounded-3xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-4 sm:p-6">
+              <CardTitle className="text-lg sm:text-xl font-bold">Key Ratios</CardTitle>
             </CardHeader>
-            <CardContent className="p-6">
-              <div className="space-y-6">
-                <div className="p-4 bg-gradient-to-r from-emerald-100 to-teal-100 rounded-2xl">
+            <CardContent className="p-4 sm:p-6">
+              <div className="space-y-4 sm:space-y-6">
+                <div className="p-3 sm:p-4 bg-gradient-to-r from-emerald-100 to-teal-100 rounded-xl sm:rounded-2xl">
                   <div className="flex justify-between items-center mb-3">
-                    <span className="font-semibold text-slate-700">Collection Rate</span>
-                    <span className="text-2xl font-bold text-emerald-600">
-                      {metrics.totalInvestedAmount > 0 
-                        ? `${((metrics.totalCollections / metrics.totalInvestedAmount) * 100).toFixed(1)}%`
+                    <span className="font-semibold text-slate-700 text-sm sm:text-base">Collection Rate</span>
+                    <span className="text-xl sm:text-2xl font-bold text-emerald-600">
+                      {metrics.totalOutflow > 0 
+                        ? `${((metrics.totalCollections / metrics.totalOutflow) * 100).toFixed(1)}%`
                         : '0%'
                       }
                     </span>
                   </div>
-                  <div className="w-full bg-emerald-200 rounded-full h-3">
+                  <div className="w-full bg-emerald-200 rounded-full h-2 sm:h-3">
                     <div 
-                      className="bg-emerald-500 h-3 rounded-full transition-all duration-1000" 
-                      style={{ width: `${Math.min(100, (metrics.totalCollections / metrics.totalInvestedAmount) * 100)}%` }}
+                      className="bg-emerald-500 h-2 sm:h-3 rounded-full transition-all duration-1000" 
+                      style={{ width: `${Math.min(100, (metrics.totalCollections / metrics.totalOutflow) * 100)}%` }}
                     ></div>
                   </div>
                 </div>
                 
-                <div className="p-4 bg-gradient-to-r from-purple-100 to-indigo-100 rounded-2xl">
+                <div className="p-3 sm:p-4 bg-gradient-to-r from-purple-100 to-indigo-100 rounded-xl sm:rounded-2xl">
                   <div className="flex justify-between items-center mb-3">
-                    <span className="font-semibold text-slate-700">Profit Margin</span>
-                    <span className="text-2xl font-bold text-purple-600">
-                      {metrics.totalInvestedAmount > 0 
-                        ? `${((metrics.expectedProfit / metrics.totalInvestedAmount) * 100).toFixed(1)}%`
+                    <span className="font-semibold text-slate-700 text-sm sm:text-base">Profit Margin</span>
+                    <span className="text-xl sm:text-2xl font-bold text-purple-600">
+                      {metrics.totalOutflow > 0 
+                        ? `${((metrics.expectedProfit / metrics.totalOutflow) * 100).toFixed(1)}%`
                         : '0%'
                       }
                     </span>
                   </div>
-                  <div className="w-full bg-purple-200 rounded-full h-3">
+                  <div className="w-full bg-purple-200 rounded-full h-2 sm:h-3">
                     <div 
-                      className="bg-purple-500 h-3 rounded-full transition-all duration-1000" 
-                      style={{ width: `${Math.min(100, (metrics.expectedProfit / metrics.totalInvestedAmount) * 100)}%` }}
+                      className="bg-purple-500 h-2 sm:h-3 rounded-full transition-all duration-1000" 
+                      style={{ width: `${Math.min(100, (metrics.expectedProfit / metrics.totalOutflow) * 100)}%` }}
                     ></div>
                   </div>
                 </div>
 
-                <div className="p-4 bg-gradient-to-r from-blue-100 to-cyan-100 rounded-2xl">
+                <div className="p-3 sm:p-4 bg-gradient-to-r from-blue-100 to-cyan-100 rounded-xl sm:rounded-2xl">
                   <div className="flex justify-between items-center mb-3">
-                    <span className="font-semibold text-slate-700">Outstanding Ratio</span>
-                    <span className="text-2xl font-bold text-blue-600">
-                      {metrics.totalInvestedAmount > 0 
-                        ? `${((metrics.outstandingAmount / metrics.totalInvestedAmount) * 100).toFixed(1)}%`
+                    <span className="font-semibold text-slate-700 text-sm sm:text-base">Outstanding Ratio</span>
+                    <span className="text-xl sm:text-2xl font-bold text-blue-600">
+                      {metrics.totalOutflow > 0 
+                        ? `${((metrics.outstandingAmount / metrics.totalOutflow) * 100).toFixed(1)}%`
                         : '0%'
                       }
                     </span>
                   </div>
-                  <div className="w-full bg-blue-200 rounded-full h-3">
+                  <div className="w-full bg-blue-200 rounded-full h-2 sm:h-3">
                     <div 
-                      className="bg-blue-500 h-3 rounded-full transition-all duration-1000" 
-                      style={{ width: `${Math.min(100, (metrics.outstandingAmount / metrics.totalInvestedAmount) * 100)}%` }}
+                      className="bg-blue-500 h-2 sm:h-3 rounded-full transition-all duration-1000" 
+                      style={{ width: `${Math.min(100, (metrics.outstandingAmount / metrics.totalOutflow) * 100)}%` }}
                     ></div>
                   </div>
                 </div>
@@ -784,7 +825,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, collections, funds }) => {
 
       {activeSection === 'alerts' && (
         <div className="space-y-6">
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className="grid gap-4 sm:gap-6 grid-cols-1 md:grid-cols-2">
             <MetricCard
               title="Near Closing"
               value={metrics.nearToClosingCustomers.length}
